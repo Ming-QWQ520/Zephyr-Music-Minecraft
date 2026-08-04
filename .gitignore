@@ -1,25 +1,44 @@
-# eclipse
-bin
-*.launch
-.settings
-.metadata
-.classpath
-.project
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
 
-# idea
-out
+# IDE
+.idea/
+*.iml
 *.ipr
 *.iws
-*.iml
-.idea
+.vscode/
+.settings/
+.classpath
+.project
+.metadata/
+bin/
+out/
 
-# gradle
-build
-.gradle
+# Eclipse
+*.launch
+eclipse/
 
-# other
-eclipse
-run
+# Runtime
+run/
+run-data/
 
-# Files from Forge MDK
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Cookies / credentials (never commit)
+cookies.txt
+*.cookie
+config/zephyrmusic-client.toml
+
+# Build artifacts
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# Forge MDK extras
 forge*changelog.txt
