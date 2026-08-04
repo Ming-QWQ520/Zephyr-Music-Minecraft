@@ -58,10 +58,14 @@ public class PlayerScreen extends Screen
                 b -> p.setVolume(p.getVolume() + 0.1f))
                 .bounds(cx + 140, this.height - 60, 30, 20).build());
 
-        // 上方按钮 - 歌单 / 登录
+        // 上方按钮 - 歌单 / 搜索 / 登录
         addRenderableWidget(Button.builder(Component.literal("我的歌单"), b -> {
             minecraft.setScreen(new PlaylistBrowserScreen());
         }).bounds(10, 10, 80, 20).build());
+
+        addRenderableWidget(Button.builder(Component.literal("🔍 搜索"), b -> {
+            minecraft.setScreen(new SearchScreen());
+        }).bounds(95, 10, 70, 20).build());
 
         addRenderableWidget(Button.builder(Component.literal(NeteaseSession.getInstance().isLoggedIn() ? "账号" : "登录"),
                 b -> minecraft.setScreen(new LoginScreen()))

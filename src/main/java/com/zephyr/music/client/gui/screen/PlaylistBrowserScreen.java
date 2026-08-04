@@ -49,10 +49,12 @@ public class PlaylistBrowserScreen extends Screen
                 .bounds(this.width - 80, 10, 60, 20).build());
         addRenderableWidget(Button.builder(Component.literal("账号/登录"), b -> minecraft.setScreen(new LoginScreen()))
                 .bounds(this.width - 170, 10, 80, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("🔍 搜索"), b -> minecraft.setScreen(new SearchScreen()))
+                .bounds(this.width - 250, 10, 70, 20).build());
         addRenderableWidget(Button.builder(Component.literal("播放器"), b -> minecraft.setScreen(new PlayerScreen()))
-                .bounds(this.width - 260, 10, 80, 20).build());
+                .bounds(this.width - 330, 10, 70, 20).build());
         addRenderableWidget(Button.builder(Component.literal("⟳ 刷新"), b -> refreshPlaylists())
-                .bounds(this.width - 320, 10, 50, 20).build());
+                .bounds(this.width - 390, 10, 50, 20).build());
 
         if (state == ViewState.LIST_SONGS)
         {
@@ -217,6 +219,22 @@ public class PlaylistBrowserScreen extends Screen
         MusicPlayer.getInstance().playSong(songs.get(index));
     }
 
+    /** 把指定索引的歌曲追加到播放队列尾部 */
+    private void appendToQueueAt(int index)
+    {
+        if (index < 0 || index >= songs.size()) return;
+        NeteaseSong s = songs.get(index);
+        MusicPlayer mp = MusicPlayer.getInstance();
+        List<NeteaseSong> q = new ArrayList<>(mp.getQueue());
+        boolean exists = false;
+        for (NeteaseSong q1 : q) { if (q1.id == s.id) { exists = true; break; } }
+        if (!exists)
+        {
+            q.add(s);
+            mp.setQueue(q, mp.getQueueIndex());
+        }
+    }
+
     /** 歌单列表 */
     class PlaylistList extends ObjectSelectionList<PlaylistList.Entry>
     {
@@ -301,6 +319,7 @@ public class PlaylistBrowserScreen extends Screen
         {
             final NeteaseSong song;
             final int index;
+            long lastClickTime = 0;
 
             Entry(NeteaseSong song, int index)
             {
@@ -331,12 +350,46 @@ public class PlaylistBrowserScreen extends Screen
                     g.drawString(PlaylistBrowserScreen.this.font, Component.literal("▶"),
                             left - 12, top + 3, 0xFF1DB954, false);
                 }
+                // 在队列中标记
+                for (NeteaseSong q : MusicPlayer.getInstance().getQueue())
+                {
+                    if (q.id == song.id)
+                    {
+                        g.drawString(PlaylistBrowserScreen.this.font, Component.literal("❉"),
+                                left + width - 12, top + 3, 0xFFFFFF55, false);
+                        break;
+                    }
+                }
+                // 提示文字
+                if (hovering)
+                {
+                    g.drawString(PlaylistBrowserScreen.this.font, Component.literal("单击播放 · 双击加入队列 · 右键加入队列"),
+                            left + width - 220, top + 3, 0xFF888888, false);
+                }
             }
 
             @Override
             public boolean mouseClicked(double mouseX, double mouseY, int button)
             {
-                playSongAt(this.index);
+                SongList.this.setSelected(this);
+                if (button == 1)
+                {
+                    // 右键加入队列
+                    appendToQueueAt(this.index);
+                    return true;
+                }
+                long now = System.currentTimeMillis();
+                if (now - lastClickTime < 400)
+                {
+                    // 双击
+                    appendToQueueAt(this.index);
+                }
+                else
+                {
+                    // 单击播放
+                    playSongAt(this.index);
+                }
+                lastClickTime = now;
                 return true;
             }
 
