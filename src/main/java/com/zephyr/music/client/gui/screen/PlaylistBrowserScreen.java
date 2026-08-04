@@ -217,8 +217,11 @@ public class PlaylistBrowserScreen extends Screen
     private void playSongAt(int index)
     {
         if (index < 0 || index >= songs.size()) return;
-        MusicPlayer.getInstance().setQueue(songs, index);
-        MusicPlayer.getInstance().playSong(songs.get(index));
+        MusicPlayer mp = MusicPlayer.getInstance();
+        mp.setQueue(songs, index);
+        // 设置来源歌单 ID（用于打卡）
+        if (currentPlaylist != null) mp.setCurrentSourcePlaylistId(currentPlaylist.id);
+        mp.playSong(songs.get(index));
     }
 
     /** 把指定索引的歌曲追加到播放队列尾部 */

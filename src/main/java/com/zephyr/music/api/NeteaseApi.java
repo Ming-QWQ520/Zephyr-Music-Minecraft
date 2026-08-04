@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.zephyr.music.ZephyrMusic;
+import com.zephyr.music.config.ZephyrConfig;
 import com.zephyr.music.net.NeteaseHttpClient;
 
 import java.util.ArrayList;
@@ -217,7 +218,7 @@ public class NeteaseApi
         return http.get("/lyric/new", p);
     }
 
-    /** 打卡 */
+    /** 打卡（/scrobble，非加密 eapi）— startplay → 最近播放，play → 听歌排行计数 */
     public CompletableFuture<JsonObject> scrobble(long id, long sourceid, int time)
     {
         Map<String, String> p = new HashMap<>();
@@ -225,6 +226,36 @@ public class NeteaseApi
         p.put("sourceid", String.valueOf(sourceid));
         p.put("time", String.valueOf(time));
         return http.get("/scrobble", p);
+    }
+
+    /**
+     * 听歌打卡 V2（/scrobble/v1，NCBL 加密 clientlog PLV/PLD）— 听歌足迹实际听歌时长
+     * 移植自 Zephyr Music 参考项目 src/api/netease/song.ts 的 scrobbleV1
+     *
+     * @param id 歌曲 ID
+     * @param time 播放时长（秒）
+     * @param sourceid 来源列表 ID
+     * @param songName 歌曲名
+     * @param artist 艺术家
+     * @param total 歌曲总时长（秒）
+     * @param isAutoNext 是否自动播放完毕（true=完整时长，false=手动切歌）
+     */
+    public CompletableFuture<JsonObject> scrobbleV1(
+            long id, long time, long sourceid,
+            String songName, String artist, long total, boolean isAutoNext)
+    {
+        Map<String, String> p = new HashMap<>();
+        p.put("id", String.valueOf(id));
+        p.put("time", String.valueOf(time));
+        if (sourceid > 0) p.put("sourceid", String.valueOf(sourceid));
+        p.put("sourceName", "list");
+        if (songName != null && !songName.isEmpty()) p.put("song", songName);
+        if (artist != null && !artist.isEmpty()) p.put("artist", artist);
+        p.put("bitrate", "320");
+        String level = ZephyrConfig.DEFAULT_QUALITY.get();
+        if (level != null && !level.isEmpty()) p.put("level", level);
+        if (total > 0) p.put("total", String.valueOf(total));
+        return http.get("/scrobble/v1", p);
     }
 
     // ============== 搜索 ==============

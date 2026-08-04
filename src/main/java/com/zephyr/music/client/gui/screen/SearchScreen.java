@@ -126,8 +126,11 @@ public class SearchScreen extends Screen
     private void playSongAt(int index)
     {
         if (index < 0 || index >= results.size()) return;
-        MusicPlayer.getInstance().setQueue(results, index);
-        MusicPlayer.getInstance().playSong(results.get(index));
+        MusicPlayer mp = MusicPlayer.getInstance();
+        mp.setQueue(results, index);
+        // 搜索来源没有歌单 ID，用歌曲自身 ID 作为 sourceid
+        mp.setCurrentSourcePlaylistId(0);
+        mp.playSong(results.get(index));
         statusMessage = "正在播放: " + results.get(index).name;
         statusColor = 0xFF1DB954;
     }

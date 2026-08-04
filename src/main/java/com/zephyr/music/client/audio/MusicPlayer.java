@@ -209,6 +209,8 @@ public class MusicPlayer
      */
     public void playSong(NeteaseSong song)
     {
+        // ★ 切歌时先对上一首歌做打卡（手动切歌）
+        ScrobbleManager.getInstance().onManualSkip();
         stopInternal(false);
         playExecutor.submit(() -> {
             try
@@ -238,15 +240,11 @@ public class MusicPlayer
                         url.length() > 80 ? url.substring(0, 80) + "..." : url);
 
                 // ★ 修复：歌词异步加载，不阻塞 startPlayback
-                // 之前用 .join() 同步等待，导致歌词 API 慢时播放会延迟到歌词加载完才开始
                 loadLyricsAsync(song.id);
                 startPlayback(url);
 
-                if (ZephyrConfig.SCROBBLE_ENABLED.get())
-                {
-                    NeteaseSession.getInstance().getApi().scrobble(song.id, 0, 0)
-                            .thenAccept(r -> ZephyrMusic.LOGGER.debug("[Zephyr] scrobble sent"));
-                }
+                // ★ 初始化打卡信息（不再立即调用 scrobble，由 ScrobbleManager 管理）
+                ScrobbleManager.getInstance().initSong(song, currentSourcePlaylistId);
             }
             catch (Exception e)
             {
@@ -254,6 +252,14 @@ public class MusicPlayer
                 listeners.forEach(l -> l.onError("播放失败: " + e.getMessage()));
             }
         });
+    }
+
+    /** 当前播放来源歌单 ID（用于打卡来源标识） */
+    private long currentSourcePlaylistId = 0;
+
+    public void setCurrentSourcePlaylistId(long playlistId)
+    {
+        this.currentSourcePlaylistId = playlistId;
     }
 
     /** 异步加载歌词，不阻塞 startPlayback */
@@ -374,6 +380,9 @@ public class MusicPlayer
         playThread.setDaemon(true);
         playThread.start();
 
+        // ★ 启动打卡计时（播放开始）
+        ScrobbleManager.getInstance().startTicking();
+
         listeners.forEach(l -> l.onPlayStateChanged(true, false));
     }
 
@@ -451,6 +460,8 @@ public class MusicPlayer
                     if (frame == null)
                     {
                         ZephyrMusic.LOGGER.info("[Zephyr] Stream ended after {} frames", frameCount);
+                        // ★ 自动播放完毕，触发打卡（上报完整时长）
+                        ScrobbleManager.getInstance().onSongEnded();
                         boolean wasLast = (queueIndex >= queue.size() - 1);
                         if (loopMode || !wasLast)
                         {
@@ -560,7 +571,8 @@ public class MusicPlayer
             paused.set(true);
             positionOffsetSec = getPositionSec();
             playStartTimeMs = 0;
-            // 停止 SourceDataLine 输出（但保留 buffer）
+            // 停止打卡计时
+            ScrobbleManager.getInstance().stopTicking();
             try
             {
                 if (currentLine != null) currentLine.stop();
@@ -576,6 +588,8 @@ public class MusicPlayer
         {
             paused.set(false);
             playStartTimeMs = System.currentTimeMillis();
+            // 恢复打卡计时
+            ScrobbleManager.getInstance().startTicking();
             try
             {
                 if (currentLine != null) currentLine.start();
@@ -596,6 +610,9 @@ public class MusicPlayer
         playing.set(false);
         paused.set(false);
         playStartTimeMs = 0;
+
+        // ★ 停止打卡计时（但不打卡，由调用方决定是否打卡）
+        ScrobbleManager.getInstance().stopTicking();
 
         cleanupPlaybackResources();
 
