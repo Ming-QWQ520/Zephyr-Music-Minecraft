@@ -1,0 +1,26 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="AGPL-3.0"
+# Client-side only mod
+clientSideOnly=true
+
+[[mods]]
+modId="zephyrmusic"
+version="1.0.0"
+displayName="Zephyr Music"
+authors="ZephyrStudio"
+description='Play NetEase Cloud Music in Minecraft. Features QR/SMS/Email login, playlist browsing, in-game HUD with lyrics, and full GUI controls.'
+
+[[dependencies.zephyrmusic]]
+    modId="forge"
+    mandatory=true
+    versionRange="[47,)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.zephyrmusic]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.20.1,1.21)"
+    ordering="NONE"
+    side="BOTH"

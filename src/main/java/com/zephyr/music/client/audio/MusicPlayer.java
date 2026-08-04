@@ -1,0 +1,511 @@
+package com.zephyr.music.client.audio;
+
+import com.google.gson.JsonObject;
+import com.zephyr.music.ZephyrMusic;
+import com.zephyr.music.api.LyricLine;
+import com.zephyr.music.api.NeteaseApi;
+import com.zephyr.music.api.NeteaseSong;
+import com.zephyr.music.api.NeteaseSession;
+import com.zephyr.music.config.ZephyrConfig;
+import javazoom.jl.decoder.Bitstream;
+import javazoom.jl.decoder.Decoder;
+import javazoom.jl.decoder.Header;
+import javazoom.jl.decoder.JavaLayerException;
+import javazoom.jl.decoder.SampleBuffer;
+import javazoom.jl.player.AudioDevice;
+import javazoom.jl.player.FactoryRegistry;
+
+import javax.sound.sampled.FloatControl;
+import javax.sound.sampled.SourceDataLine;
+import java.io.BufferedInputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URI;
+import java.net.URL;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+
+/**
+ * 音频播放引擎 - 基于 JLayer + Java Sound API
+ *
+ * - 支持从 URL 流式播放 MP3
+ * - 后台线程解码 + JavaSoundAudioDevice 播放
+ * - 暴露播放进度（用于歌词同步）
+ */
+public class MusicPlayer
+{
+    private static MusicPlayer instance;
+
+    private final ExecutorService playExecutor;
+    private final List<PlaybackListener> listeners = new CopyOnWriteArrayList<>();
+
+    private volatile Thread playThread;
+    private volatile Bitstream currentBitstream;
+    private volatile Decoder currentDecoder;
+    private volatile AudioDevice currentDevice;
+    private volatile HttpURLConnection currentConnection;
+
+    private final AtomicBoolean playing = new AtomicBoolean(false);
+    private final AtomicBoolean paused = new AtomicBoolean(false);
+    private final AtomicBoolean stopped = new AtomicBoolean(false);
+
+    private final AtomicReference<NeteaseSong> currentSong = new AtomicReference<>();
+    private final AtomicReference<List<LyricLine>> currentLyrics = new AtomicReference<>(Collections.emptyList());
+
+    private volatile long playStartTimeMs = 0;
+    private volatile double positionOffsetSec = 0;
+
+    private final List<NeteaseSong> queue = new CopyOnWriteArrayList<>();
+    private volatile int queueIndex = -1;
+    private volatile boolean loopMode = false;
+
+    private MusicPlayer()
+    {
+        this.playExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "ZephyrMusic-Dispatcher");
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    public static synchronized MusicPlayer getInstance()
+    {
+        if (instance == null) instance = new MusicPlayer();
+        return instance;
+    }
+
+    public interface PlaybackListener
+    {
+        default void onSongChanged(NeteaseSong song) {}
+        default void onPlayStateChanged(boolean playing, boolean paused) {}
+        default void onLyricsLoaded(List<LyricLine> lyrics) {}
+        default void onError(String message) {}
+    }
+
+    public void addListener(PlaybackListener l)
+    {
+        if (!listeners.contains(l)) listeners.add(l);
+    }
+
+    public void removeListener(PlaybackListener l)
+    {
+        listeners.remove(l);
+    }
+
+    public NeteaseSong getCurrentSong()
+    {
+        return currentSong.get();
+    }
+
+    public List<LyricLine> getCurrentLyrics()
+    {
+        return currentLyrics.get();
+    }
+
+    public boolean isPlaying()
+    {
+        return playing.get();
+    }
+
+    public boolean isPaused()
+    {
+        return paused.get();
+    }
+
+    public double getPositionSec()
+    {
+        if (paused.get())
+        {
+            return positionOffsetSec;
+        }
+        if (playing.get() && playStartTimeMs > 0)
+        {
+            return positionOffsetSec + (System.currentTimeMillis() - playStartTimeMs) / 1000.0;
+        }
+        return 0;
+    }
+
+    public float getVolume()
+    {
+        return ZephyrConfig.HUD_VOLUME.get().floatValue();
+    }
+
+    public void setVolume(float v)
+    {
+        ZephyrConfig.HUD_VOLUME.set((double) Math.max(0, Math.min(1, v)));
+        applyVolumeToLine();
+    }
+
+    private void applyVolumeToLine()
+    {
+        try
+        {
+            if (currentDevice instanceof javazoom.jl.player.JavaSoundAudioDevice)
+            {
+                // JavaSoundAudioDevice 没有暴露 line，我们通过反射获取
+                java.lang.reflect.Field f = javazoom.jl.player.JavaSoundAudioDevice.class.getDeclaredField("source");
+                f.setAccessible(true);
+                Object line = f.get(currentDevice);
+                if (line instanceof SourceDataLine)
+                {
+                    SourceDataLine sdl = (SourceDataLine) line;
+                    if (sdl.isControlSupported(FloatControl.Type.MASTER_GAIN))
+                    {
+                        FloatControl gain = (FloatControl) sdl.getControl(FloatControl.Type.MASTER_GAIN);
+                        float vol = ZephyrConfig.HUD_VOLUME.get().floatValue();
+                        if (vol <= 0)
+                        {
+                            gain.setValue(gain.getMinimum());
+                        }
+                        else
+                        {
+                            float dB = 20f * (float) Math.log10(Math.max(0.01, vol));
+                            gain.setValue(Math.max(gain.getMinimum(), Math.min(gain.getMaximum(), dB)));
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ignored) {}
+    }
+
+    /**
+     * 设置播放队列
+     */
+    public void setQueue(List<NeteaseSong> songs, int startIndex)
+    {
+        this.queue.clear();
+        this.queue.addAll(songs);
+        this.queueIndex = Math.max(0, Math.min(startIndex, songs.size() - 1));
+    }
+
+    public List<NeteaseSong> getQueue()
+    {
+        return queue;
+    }
+
+    public int getQueueIndex()
+    {
+        return queueIndex;
+    }
+
+    public boolean isLoopMode()
+    {
+        return loopMode;
+    }
+
+    public void setLoopMode(boolean loop)
+    {
+        this.loopMode = loop;
+    }
+
+    /**
+     * 播放指定歌曲
+     */
+    public void playSong(NeteaseSong song)
+    {
+        stopInternal(false);
+        playExecutor.submit(() -> {
+            try
+            {
+                ZephyrMusic.LOGGER.info("[Zephyr] Requested: {} - {}", song.name, song.artist);
+                currentSong.set(song);
+                listeners.forEach(l -> l.onSongChanged(song));
+
+                String level = ZephyrConfig.DEFAULT_QUALITY.get();
+                if (level == null || level.isEmpty()) level = "exhigh";
+                JsonObject urlResp = NeteaseSession.getInstance().getApi().songUrlV1(song.id, level).join();
+                String url = NeteaseApi.extractSongUrl(urlResp);
+                if (url == null || url.isEmpty())
+                {
+                    urlResp = NeteaseSession.getInstance().getApi().songUrl(song.id).join();
+                    url = NeteaseApi.extractSongUrl(urlResp);
+                }
+                if (url == null || url.isEmpty())
+                {
+                    String msg = "无法获取播放 URL（可能无版权或需要 VIP）";
+                    ZephyrMusic.LOGGER.warn("[Zephyr] {}", msg);
+                    listeners.forEach(l -> l.onError(msg));
+                    return;
+                }
+
+                ZephyrMusic.LOGGER.info("[Zephyr] Got URL: {}",
+                        url.length() > 80 ? url.substring(0, 80) + "..." : url);
+
+                loadLyrics(song.id);
+                startPlayback(url);
+
+                if (ZephyrConfig.SCROBBLE_ENABLED.get())
+                {
+                    NeteaseSession.getInstance().getApi().scrobble(song.id, 0, 0)
+                            .thenAccept(r -> ZephyrMusic.LOGGER.debug("[Zephyr] scrobble sent"));
+                }
+            }
+            catch (Exception e)
+            {
+                ZephyrMusic.LOGGER.error("[Zephyr] playSong failed", e);
+                listeners.forEach(l -> l.onError("播放失败: " + e.getMessage()));
+            }
+        });
+    }
+
+    private void loadLyrics(long songId)
+    {
+        try
+        {
+            JsonObject resp = NeteaseSession.getInstance().getApi().lyricNew(songId).join();
+            List<LyricLine> lyrics = Collections.emptyList();
+            if (resp.has("yrc") && resp.getAsJsonObject("yrc").has("lyric")
+                    && !resp.getAsJsonObject("yrc").get("lyric").isJsonNull())
+            {
+                String yrc = resp.getAsJsonObject("yrc").get("lyric").getAsString();
+                lyrics = NeteaseApi.parseYrc(yrc);
+                if (lyrics.isEmpty())
+                {
+                    String lrc = resp.has("lrc") && resp.getAsJsonObject("lrc").has("lyric")
+                            && !resp.getAsJsonObject("lrc").get("lyric").isJsonNull()
+                            ? resp.getAsJsonObject("lrc").get("lyric").getAsString() : "";
+                    lyrics = NeteaseApi.parseLrc(lrc);
+                }
+            }
+            else if (resp.has("lrc") && resp.getAsJsonObject("lrc").has("lyric")
+                    && !resp.getAsJsonObject("lrc").get("lyric").isJsonNull())
+            {
+                String lrc = resp.getAsJsonObject("lrc").get("lyric").getAsString();
+                lyrics = NeteaseApi.parseLrc(lrc);
+            }
+            currentLyrics.set(lyrics);
+            final List<LyricLine> loadedLyrics = lyrics;
+            listeners.forEach(l -> l.onLyricsLoaded(loadedLyrics));
+            ZephyrMusic.LOGGER.info("[Zephyr] Lyrics: {} lines", lyrics.size());
+        }
+        catch (Exception e)
+        {
+            ZephyrMusic.LOGGER.warn("[Zephyr] loadLyrics failed: {}", e.getMessage());
+            currentLyrics.set(Collections.emptyList());
+        }
+    }
+
+    private void startPlayback(String urlStr) throws Exception
+    {
+        URL url = URI.create(urlStr).toURL();
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setConnectTimeout(15000);
+        conn.setReadTimeout(60000);
+        conn.setRequestProperty("User-Agent", "ZephyrMusic-Mod/1.0");
+        conn.setRequestProperty("Referer", "https://music.163.com/");
+        conn.connect();
+
+        int code = conn.getResponseCode();
+        if (code != 200)
+        {
+            throw new RuntimeException("HTTP " + code + " fetching audio stream");
+        }
+
+        InputStream is = new BufferedInputStream(conn.getInputStream(), 64 * 1024);
+        currentConnection = conn;
+        currentBitstream = new Bitstream(is);
+        currentDecoder = new Decoder();
+        currentDevice = FactoryRegistry.systemRegistry().createAudioDevice();
+        try
+        {
+            currentDevice.open(currentDecoder);
+        }
+        catch (JavaLayerException e)
+        {
+            throw new RuntimeException("AudioDevice open failed: " + e.getMessage(), e);
+        }
+
+        stopped.set(false);
+        paused.set(false);
+        playing.set(true);
+        playStartTimeMs = System.currentTimeMillis();
+        positionOffsetSec = 0;
+
+        applyVolumeToLine();
+
+        playThread = new Thread(this::decodeLoop, "ZephyrMusic-Decode");
+        playThread.setDaemon(true);
+        playThread.start();
+
+        listeners.forEach(l -> l.onPlayStateChanged(true, false));
+    }
+
+    private void decodeLoop()
+    {
+        try
+        {
+            while (!stopped.get())
+            {
+                if (paused.get())
+                {
+                    try { Thread.sleep(50); } catch (InterruptedException e) { break; }
+                    continue;
+                }
+                try
+                {
+                    Header frame = currentBitstream.readFrame();
+                    if (frame == null)
+                    {
+                        // 流结束
+                        ZephyrMusic.LOGGER.debug("[Zephyr] Stream ended");
+                        boolean wasLast = (queueIndex >= queue.size() - 1);
+                        if (loopMode || !wasLast)
+                        {
+                            playExecutor.submit(this::next);
+                        }
+                        break;
+                    }
+                    SampleBuffer buf = (SampleBuffer) currentDecoder.decodeFrame(frame, currentBitstream);
+                    currentBitstream.closeFrame();
+                    short[] samples = buf.getBuffer();
+                    int len = buf.getBufferLength();
+                    if (len > 0 && currentDevice != null)
+                    {
+                        currentDevice.write(samples, 0, len);
+                    }
+                }
+                catch (JavaLayerException e)
+                {
+                    ZephyrMusic.LOGGER.debug("[Zephyr] decode frame error: {}", e.getMessage());
+                    break;
+                }
+                catch (Exception e)
+                {
+                    ZephyrMusic.LOGGER.warn("[Zephyr] decodeLoop error: {}", e.getMessage());
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            ZephyrMusic.LOGGER.debug("[Zephyr] decodeLoop ending");
+            cleanupPlaybackResources();
+        }
+    }
+
+    private void cleanupPlaybackResources()
+    {
+        try
+        {
+            if (currentDevice != null)
+            {
+                try { currentDevice.flush(); } catch (Exception ignored) {}
+                try { currentDevice.close(); } catch (Exception ignored) {}
+                currentDevice = null;
+            }
+            if (currentBitstream != null)
+            {
+                try { currentBitstream.close(); } catch (Exception ignored) {}
+                currentBitstream = null;
+            }
+            if (currentConnection != null)
+            {
+                try { currentConnection.disconnect(); } catch (Exception ignored) {}
+                currentConnection = null;
+            }
+        }
+        catch (Exception ignored) {}
+    }
+
+    public void pause()
+    {
+        if (playing.get() && !paused.get())
+        {
+            paused.set(true);
+            positionOffsetSec = getPositionSec();
+            playStartTimeMs = 0;
+            listeners.forEach(l -> l.onPlayStateChanged(false, true));
+        }
+    }
+
+    public void resume()
+    {
+        if (playing.get() && paused.get())
+        {
+            paused.set(false);
+            playStartTimeMs = System.currentTimeMillis();
+            listeners.forEach(l -> l.onPlayStateChanged(true, false));
+        }
+    }
+
+    public void stop()
+    {
+        stopInternal(true);
+    }
+
+    private void stopInternal(boolean notify)
+    {
+        stopped.set(true);
+        playing.set(false);
+        paused.set(false);
+        playStartTimeMs = 0;
+
+        cleanupPlaybackResources();
+
+        if (notify)
+        {
+            listeners.forEach(l -> l.onPlayStateChanged(false, false));
+        }
+    }
+
+    /**
+     * 下一首
+     */
+    public void next()
+    {
+        if (queue.isEmpty())
+        {
+            stop();
+            return;
+        }
+        int next = queueIndex + 1;
+        if (next >= queue.size())
+        {
+            if (loopMode)
+            {
+                next = 0;
+            }
+            else
+            {
+                stop();
+                return;
+            }
+        }
+        queueIndex = next;
+        playSong(queue.get(next));
+    }
+
+    /**
+     * 上一首
+     */
+    public void prev()
+    {
+        if (queue.isEmpty()) return;
+        int prev = queueIndex - 1;
+        if (prev < 0)
+        {
+            if (loopMode)
+            {
+                prev = queue.size() - 1;
+            }
+            else
+            {
+                prev = 0;
+            }
+        }
+        queueIndex = prev;
+        playSong(queue.get(prev));
+    }
+
+    public void shutdown()
+    {
+        stopInternal(false);
+        playExecutor.shutdownNow();
+    }
+}
