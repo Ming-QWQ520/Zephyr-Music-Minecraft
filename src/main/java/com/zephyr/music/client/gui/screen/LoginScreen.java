@@ -111,7 +111,9 @@ public class LoginScreen extends Screen
         loginBtn = Button.builder(Component.literal("登 录"), b -> doLogin())
                 .bounds(cx - 60, fy + 100, 120, 20).build();
 
-        // 关闭按钮
+        addRenderableWidget(Button.builder(Component.literal("⚙"), b -> minecraft.setScreen(new SettingsScreen()))
+                .bounds(this.width - 160, 6, 50, 18).build());
+
         addRenderableWidget(Button.builder(Component.literal("返回"), b -> onClose())
                 .bounds(this.width - 70, 6, 60, 18).build());
 

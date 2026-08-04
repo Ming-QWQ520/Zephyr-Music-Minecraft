@@ -237,7 +237,9 @@ public class MusicPlayer
                 ZephyrMusic.LOGGER.info("[Zephyr] Got URL: {}",
                         url.length() > 80 ? url.substring(0, 80) + "..." : url);
 
-                loadLyrics(song.id);
+                // ★ 修复：歌词异步加载，不阻塞 startPlayback
+                // 之前用 .join() 同步等待，导致歌词 API 慢时播放会延迟到歌词加载完才开始
+                loadLyricsAsync(song.id);
                 startPlayback(url);
 
                 if (ZephyrConfig.SCROBBLE_ENABLED.get())
@@ -254,6 +256,51 @@ public class MusicPlayer
         });
     }
 
+    /** 异步加载歌词，不阻塞 startPlayback */
+    private void loadLyricsAsync(long songId)
+    {
+        NeteaseSession.getInstance().getApi().lyricNew(songId).thenAccept(resp -> {
+            try
+            {
+                List<LyricLine> lyrics = Collections.emptyList();
+                if (resp.has("yrc") && resp.getAsJsonObject("yrc").has("lyric")
+                        && !resp.getAsJsonObject("yrc").get("lyric").isJsonNull())
+                {
+                    String yrc = resp.getAsJsonObject("yrc").get("lyric").getAsString();
+                    lyrics = NeteaseApi.parseYrc(yrc);
+                    if (lyrics.isEmpty())
+                    {
+                        String lrc = resp.has("lrc") && resp.getAsJsonObject("lrc").has("lyric")
+                                && !resp.getAsJsonObject("lrc").get("lyric").isJsonNull()
+                                ? resp.getAsJsonObject("lrc").get("lyric").getAsString() : "";
+                        lyrics = NeteaseApi.parseLrc(lrc);
+                    }
+                }
+                else if (resp.has("lrc") && resp.getAsJsonObject("lrc").has("lyric")
+                        && !resp.getAsJsonObject("lrc").get("lyric").isJsonNull())
+                {
+                    String lrc = resp.getAsJsonObject("lrc").get("lyric").getAsString();
+                    lyrics = NeteaseApi.parseLrc(lrc);
+                }
+                currentLyrics.set(lyrics);
+                final List<LyricLine> loadedLyrics = lyrics;
+                listeners.forEach(l -> l.onLyricsLoaded(loadedLyrics));
+                int yrcCount = (int) lyrics.stream().filter(l -> l.isYrc).count();
+                ZephyrMusic.LOGGER.info("[Zephyr] Lyrics loaded async: {} lines ({} yrc)", lyrics.size(), yrcCount);
+            }
+            catch (Exception e)
+            {
+                ZephyrMusic.LOGGER.warn("[Zephyr] loadLyricsAsync parse failed: {}", e.getMessage());
+                currentLyrics.set(Collections.emptyList());
+            }
+        }).exceptionally(e -> {
+            ZephyrMusic.LOGGER.warn("[Zephyr] loadLyricsAsync failed: {}", e.getMessage());
+            currentLyrics.set(Collections.emptyList());
+            return null;
+        });
+    }
+
+    @Deprecated
     private void loadLyrics(long songId)
     {
         try

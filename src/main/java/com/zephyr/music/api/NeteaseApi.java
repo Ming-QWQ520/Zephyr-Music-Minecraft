@@ -341,33 +341,127 @@ public class NeteaseApi
 
     /**
      * 解析 yrc 逐字歌词为按行的 LyricLine 列表
-     * 格式: [行开始ms,行总时长ms](字开始ms,字时长ms,0)字...
+     * 支持三种行格式（按行自动识别）：
+     * 1. 旧格式: [行开始ms,行总时长ms](字开始ms,字时长ms,0)字(字开始ms,字时长ms,0)字...
+     * 2. 新格式（JSON 整行）: {"t":开始ms,"c":[{"tx":"字","li":"图片URL"}]}
+     * 3. 普通 lrc: [mm:ss.xx]歌词
      */
     public static List<LyricLine> parseYrc(String yrcText)
     {
         List<LyricLine> lines = new ArrayList<>();
         if (yrcText == null || yrcText.isEmpty()) return lines;
+
+        java.util.regex.Pattern lineHead = java.util.regex.Pattern.compile("^\\[(\\d+),(\\d+)\\]");
+        java.util.regex.Pattern wordPat = java.util.regex.Pattern.compile("\\((\\d+),(\\d+),\\d+\\)([^\\(\\[]*)");
+
         for (String raw : yrcText.split("\n"))
         {
-            java.util.regex.Matcher m = java.util.regex.Pattern
-                    .compile("^\\[(\\d+),(\\d+)\\]").matcher(raw);
+            raw = raw.trim();
+            if (raw.isEmpty()) continue;
+
+            // 按行检测格式
+            if (raw.startsWith("{"))
+            {
+                // JSON 格式
+                LyricLine l = parseYrcJsonLine(raw);
+                if (l != null) lines.add(l);
+                continue;
+            }
+
+            // 旧格式 [ms,ms](ms,ms,0)字...
+            java.util.regex.Matcher m = lineHead.matcher(raw);
             if (!m.find()) continue;
             try
             {
                 long startMs = Long.parseLong(m.group(1));
-                double time = startMs / 1000.0;
-                String text = raw.replaceAll("^\\[\\d+,\\d+\\]", "")
-                                 .replaceAll("\\(\\d+,\\d+,\\d+\\)", "")
-                                 .trim();
-                if (!text.isEmpty())
+                double lineTime = startMs / 1000.0;
+                String rest = raw.substring(m.end());
+                List<LyricWord> words = new ArrayList<>();
+                StringBuilder sb = new StringBuilder();
+                java.util.regex.Matcher wm = wordPat.matcher(rest);
+                while (wm.find())
                 {
-                    lines.add(new LyricLine(time, text));
+                    try
+                    {
+                        long wStartMs = Long.parseLong(wm.group(1));
+                        long wDurMs = Long.parseLong(wm.group(2));
+                        String wText = wm.group(3);
+                        if (wText == null) wText = "";
+                        words.add(new LyricWord(wStartMs / 1000.0, wDurMs / 1000.0, wText));
+                        sb.append(wText);
+                    }
+                    catch (NumberFormatException ignored) {}
+                }
+                String lineText = sb.toString().trim();
+                if (!lineText.isEmpty() && !words.isEmpty())
+                {
+                    lines.add(new LyricLine(lineTime, lineText, words));
                 }
             }
             catch (NumberFormatException ignored) {}
         }
         lines.sort(java.util.Comparator.comparingDouble(l -> l.time));
         return lines;
+    }
+
+    /** 解析单行新版 JSON 格式 yrc: {"t":行开始ms,"c":[{"tx":"字"},...]} */
+    private static LyricLine parseYrcJsonLine(String raw)
+    {
+        try
+        {
+            com.google.gson.JsonObject obj = com.google.gson.JsonParser.parseString(raw).getAsJsonObject();
+            if (!obj.has("t")) return null;
+            long lineStartMs = obj.get("t").getAsLong();
+            double lineTime = lineStartMs / 1000.0;
+
+            List<LyricWord> words = new ArrayList<>();
+            StringBuilder sb = new StringBuilder();
+            if (obj.has("c") && obj.get("c").isJsonArray())
+            {
+                com.google.gson.JsonArray arr = obj.getAsJsonArray("c");
+                List<double[]> starts = new ArrayList<>();
+                List<String> texts = new ArrayList<>();
+                for (int i = 0; i < arr.size(); i++)
+                {
+                    com.google.gson.JsonObject w = arr.get(i).getAsJsonObject();
+                    String tx = w.has("tx") && !w.get("tx").isJsonNull() ? w.get("tx").getAsString() : "";
+                    double start = lineStartMs;
+                    if (w.has("ts") && !w.get("ts").isJsonNull())
+                    {
+                        start = w.get("ts").getAsDouble();
+                    }
+                    double end = w.has("te") && !w.get("te").isJsonNull() ? w.get("te").getAsDouble() : -1;
+                    starts.add(new double[]{start, end});
+                    texts.add(tx);
+                    sb.append(tx);
+                }
+                for (int i = 0; i < texts.size(); i++)
+                {
+                    double startMs = starts.get(i)[0];
+                    double endMs = starts.get(i)[1];
+                    if (endMs < 0)
+                    {
+                        if (i + 1 < texts.size())
+                        {
+                            endMs = starts.get(i + 1)[0];
+                        }
+                        else
+                        {
+                            endMs = startMs + 300;
+                        }
+                    }
+                    double durSec = Math.max(0.05, (endMs - startMs) / 1000.0);
+                    words.add(new LyricWord(startMs / 1000.0, durSec, texts.get(i)));
+                }
+            }
+            String lineText = sb.toString().trim();
+            if (lineText.isEmpty() || words.isEmpty()) return null;
+            return new LyricLine(lineTime, lineText, words);
+        }
+        catch (Exception e)
+        {
+            return null;
+        }
     }
 
     /**

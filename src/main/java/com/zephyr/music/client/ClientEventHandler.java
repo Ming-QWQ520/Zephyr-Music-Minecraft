@@ -7,6 +7,7 @@ import com.zephyr.music.client.gui.screen.LoginScreen;
 import com.zephyr.music.client.gui.screen.PlayerScreen;
 import com.zephyr.music.client.gui.screen.PlaylistBrowserScreen;
 import com.zephyr.music.client.gui.screen.SearchScreen;
+import com.zephyr.music.client.gui.screen.SettingsScreen;
 import com.zephyr.music.client.hud.MusicHudOverlay;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -30,6 +31,7 @@ public class ClientEventHandler
     public static KeyMapping KEY_OPEN_PLAYLIST;
     public static KeyMapping KEY_OPEN_LOGIN;
     public static KeyMapping KEY_OPEN_SEARCH;
+    public static KeyMapping KEY_OPEN_SETTINGS;
     public static KeyMapping KEY_TOGGLE_PLAY;
     public static KeyMapping KEY_NEXT;
     public static KeyMapping KEY_PREV;
@@ -41,6 +43,7 @@ public class ClientEventHandler
         KEY_OPEN_PLAYLIST = new KeyMapping("key.zephyr.open_playlist", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F7, "key.categories.zephyr");
         KEY_OPEN_LOGIN = new KeyMapping("key.zephyr.open_login", InputConstants.Type.KEYSYM, InputConstants.UNKNOWN.getValue(), "key.categories.zephyr");
         KEY_OPEN_SEARCH = new KeyMapping("key.zephyr.open_search", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F10, "key.categories.zephyr");
+        KEY_OPEN_SETTINGS = new KeyMapping("key.zephyr.open_settings", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F11, "key.categories.zephyr");
         KEY_TOGGLE_PLAY = new KeyMapping("key.zephyr.toggle_play", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F8, "key.categories.zephyr");
         KEY_NEXT = new KeyMapping("key.zephyr.next", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F9, "key.categories.zephyr");
         KEY_PREV = new KeyMapping("key.zephyr.prev", InputConstants.Type.KEYSYM, InputConstants.UNKNOWN.getValue(), "key.categories.zephyr");
@@ -49,6 +52,7 @@ public class ClientEventHandler
         event.register(KEY_OPEN_PLAYLIST);
         event.register(KEY_OPEN_LOGIN);
         event.register(KEY_OPEN_SEARCH);
+        event.register(KEY_OPEN_SETTINGS);
         event.register(KEY_TOGGLE_PLAY);
         event.register(KEY_NEXT);
         event.register(KEY_PREV);
@@ -90,6 +94,10 @@ public class ClientEventHandler
         else if (KEY_OPEN_SEARCH != null && KEY_OPEN_SEARCH.consumeClick())
         {
             mc.setScreen(new SearchScreen());
+        }
+        else if (KEY_OPEN_SETTINGS != null && KEY_OPEN_SETTINGS.consumeClick())
+        {
+            mc.setScreen(new SettingsScreen());
         }
         else if (KEY_TOGGLE_PLAY != null && KEY_TOGGLE_PLAY.consumeClick())
         {
