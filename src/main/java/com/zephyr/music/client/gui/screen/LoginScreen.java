@@ -112,10 +112,10 @@ public class LoginScreen extends Screen
                 .bounds(cx - 60, fy + 100, 120, 20).build();
 
         addRenderableWidget(Button.builder(Component.literal("⚙"), b -> minecraft.setScreen(new SettingsScreen()))
-                .bounds(this.width - 160, 6, 50, 18).build());
+                .bounds(this.width - 116, 6, 18, 16).build());
 
-        addRenderableWidget(Button.builder(Component.literal("返回"), b -> onClose())
-                .bounds(this.width - 70, 6, 60, 18).build());
+        addRenderableWidget(Button.builder(Component.literal("✕"), b -> onClose())
+                .bounds(this.width - 22, 6, 14, 16).build());
 
         applyMode();
         // 进入 QR 模式时立即生成

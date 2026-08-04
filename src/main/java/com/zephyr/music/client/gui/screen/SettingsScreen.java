@@ -28,11 +28,11 @@ public class SettingsScreen extends Screen
     @Override
     protected void init()
     {
-        addRenderableWidget(Button.builder(Component.literal("返回"), b -> onClose())
-                .bounds(this.width - 80, 10, 60, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("✕"), b -> onClose())
+                .bounds(this.width - 22, 6, 14, 16).build());
 
         addRenderableWidget(Button.builder(Component.literal("播放器"), b -> minecraft.setScreen(new PlayerScreen()))
-                .bounds(this.width - 160, 10, 70, 20).build());
+                .bounds(this.width - 64, 6, 42, 16).build());
 
         list = new SettingsList();
         addWidget(list);

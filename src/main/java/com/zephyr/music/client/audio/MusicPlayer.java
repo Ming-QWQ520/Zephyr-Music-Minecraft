@@ -485,10 +485,12 @@ public class MusicPlayer
 
                     if (len > 0 && currentLine != null)
                     {
+                        // ★ 防越界：samples 数组实际长度可能 < len（JLayer SampleBuffer 复用 buffer）
+                        int actualLen = Math.min(len, samples.length);
                         // short[] -> byte[] (little-endian 16-bit PCM)
-                        byte[] bytes = shortsToBytesLE(samples, len);
+                        byte[] bytes = shortsToBytesLE(samples, actualLen);
                         // SourceDataLine.write 阻塞直到 buffer 有空间
-                        currentLine.write(bytes, 0, len * 2);
+                        currentLine.write(bytes, 0, actualLen * 2);
                     }
                     frameCount++;
                 }

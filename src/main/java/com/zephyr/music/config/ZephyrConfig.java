@@ -71,12 +71,12 @@ public class ZephyrConfig
         HUD_ANCHOR = BUILDER.comment("Anchor: top_left / top_right / bottom_left / bottom_right")
                 .define("hud_anchor", "top_left");
         HUD_COMPACT = BUILDER.comment("Compact mode (no extra padding)")
-                .define("hud_compact", false);
+                .define("hud_compact", true);
         HUD_SHOW_PROGRESS_BAR = BUILDER.define("hud_show_progress_bar", true);
         HUD_SHOW_LYRICS = BUILDER.define("hud_show_lyrics", true);
-        HUD_LYRICS_LINES = BUILDER.defineInRange("hud_lyrics_lines", 4, 1, 12);
-        HUD_PANEL_WIDTH = BUILDER.defineInRange("hud_panel_width", 240, 120, 600);
-        HUD_BG_OPACITY = BUILDER.defineInRange("hud_bg_opacity", 0.65, 0.0, 1.0);
+        HUD_LYRICS_LINES = BUILDER.defineInRange("hud_lyrics_lines", 3, 1, 12);
+        HUD_PANEL_WIDTH = BUILDER.defineInRange("hud_panel_width", 220, 100, 600);
+        HUD_BG_OPACITY = BUILDER.defineInRange("hud_bg_opacity", 0.55, 0.0, 1.0);
         HUD_SHOW_COVER = BUILDER.comment("Show album cover thumbnail (downloads image)")
                 .define("hud_show_cover", false);
         BUILDER.pop();

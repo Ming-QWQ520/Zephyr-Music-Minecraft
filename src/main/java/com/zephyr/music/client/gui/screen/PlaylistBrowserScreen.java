@@ -44,19 +44,19 @@ public class PlaylistBrowserScreen extends Screen
     protected void init()
     {
         initedOnce = true;
-        // 顶部按钮
-        addRenderableWidget(Button.builder(Component.literal("返回"), b -> onClose())
-                .bounds(this.width - 80, 10, 60, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("⚙ 设置"), b -> minecraft.setScreen(new SettingsScreen()))
-                .bounds(this.width - 160, 10, 70, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("账号/登录"), b -> minecraft.setScreen(new LoginScreen()))
-                .bounds(this.width - 250, 10, 80, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("🔍 搜索"), b -> minecraft.setScreen(new SearchScreen()))
-                .bounds(this.width - 330, 10, 70, 20).build());
+        // 顶部按钮（紧凑）
+        addRenderableWidget(Button.builder(Component.literal("✕"), b -> onClose())
+                .bounds(this.width - 22, 6, 14, 16).build());
+        addRenderableWidget(Button.builder(Component.literal("⚙"), b -> minecraft.setScreen(new SettingsScreen()))
+                .bounds(this.width - 116, 6, 18, 16).build());
+        addRenderableWidget(Button.builder(Component.literal("账号"), b -> minecraft.setScreen(new LoginScreen()))
+                .bounds(this.width - 162, 6, 40, 16).build());
+        addRenderableWidget(Button.builder(Component.literal("搜索"), b -> minecraft.setScreen(new SearchScreen()))
+                .bounds(this.width - 208, 6, 40, 16).build());
         addRenderableWidget(Button.builder(Component.literal("播放器"), b -> minecraft.setScreen(new PlayerScreen()))
-                .bounds(this.width - 410, 10, 70, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("⟳ 刷新"), b -> refreshPlaylists())
-                .bounds(this.width - 470, 10, 50, 20).build());
+                .bounds(this.width - 256, 6, 42, 16).build());
+        addRenderableWidget(Button.builder(Component.literal("⟳"), b -> refreshPlaylists())
+                .bounds(this.width - 274, 6, 14, 16).build());
 
         if (state == ViewState.LIST_SONGS)
         {

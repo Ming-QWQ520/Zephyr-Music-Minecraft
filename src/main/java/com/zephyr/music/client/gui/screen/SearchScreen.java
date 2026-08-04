@@ -52,17 +52,17 @@ public class SearchScreen extends Screen
         addRenderableWidget(Button.builder(Component.literal("+ 加入队列"), b -> addToQueue())
                 .bounds(cx + 170, 28, 90, 20).build());
 
-        addRenderableWidget(Button.builder(Component.literal("返回"), b -> onClose())
-                .bounds(this.width - 70, 6, 60, 18).build());
+        addRenderableWidget(Button.builder(Component.literal("✕"), b -> onClose())
+                .bounds(this.width - 22, 6, 14, 16).build());
 
         addRenderableWidget(Button.builder(Component.literal("⚙"), b -> minecraft.setScreen(new SettingsScreen()))
-                .bounds(this.width - 135, 6, 50, 18).build());
+                .bounds(this.width - 116, 6, 18, 16).build());
 
         addRenderableWidget(Button.builder(Component.literal("播放器"), b -> minecraft.setScreen(new PlayerScreen()))
-                .bounds(this.width - 200, 6, 60, 18).build());
+                .bounds(this.width - 168, 6, 42, 16).build());
 
-        addRenderableWidget(Button.builder(Component.literal("我的歌单"), b -> minecraft.setScreen(new PlaylistBrowserScreen()))
-                .bounds(this.width - 280, 6, 70, 18).build());
+        addRenderableWidget(Button.builder(Component.literal("歌单"), b -> minecraft.setScreen(new PlaylistBrowserScreen()))
+                .bounds(this.width - 214, 6, 40, 16).build());
 
         resultList = new SearchList(minecraft, this.width - 40, this.height - 100, 60, this.height - 40, 22);
         resultList.setLeftPos(20);

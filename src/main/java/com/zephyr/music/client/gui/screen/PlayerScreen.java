@@ -16,12 +16,12 @@ import net.minecraft.network.chat.Component;
 import java.util.List;
 
 /**
- * 现代化主播放器界面
+ * 现代化主播放器界面（v3 - 更紧凑、歌词居中）
  *
- * - 顶部导航栏
- * - 中央歌曲信息卡片（含状态）
- * - 逐字歌词面板（大字体、当前行高亮、卡拉OK 模式）
- * - 底部播放控制条（圆角按钮）
+ * - 顶部紧凑导航栏
+ * - 中央歌曲信息卡片（小）
+ * - 大型歌词面板（当前歌词始终居中显示）
+ * - 底部播放控制条
  */
 public class PlayerScreen extends Screen
 {
@@ -35,56 +35,45 @@ public class PlayerScreen extends Screen
     {
         MusicPlayer p = MusicPlayer.getInstance();
         int cx = this.width / 2;
-        int bottomBarY = this.height - 50;
+        int bottomBarY = this.height - 36;
 
-        // 底部播放控制条
-        int ctrlY = bottomBarY;
-        // 音量-
+        // 底部播放控制条（更紧凑）
         addRenderableWidget(Button.builder(Component.literal("🔉"), b -> p.setVolume(p.getVolume() - 0.1f))
-                .bounds(cx - 170, ctrlY, 30, 20).build());
-        // 上一首
+                .bounds(cx - 180, bottomBarY, 26, 18).build());
         addRenderableWidget(Button.builder(Component.literal("⏮"), b -> p.prev())
-                .bounds(cx - 130, ctrlY, 40, 20).build());
-        // 播放/暂停
+                .bounds(cx - 145, bottomBarY, 36, 18).build());
         String playBtn = p.isPaused() ? "▶" : (p.isPlaying() ? "⏸" : "▶");
         addRenderableWidget(Button.builder(Component.literal(playBtn), b -> {
                     if (p.isPlaying()) {
                         if (p.isPaused()) p.resume(); else p.pause();
                     }
                 })
-                .bounds(cx - 80, ctrlY, 60, 20).build());
-        // 下一首
+                .bounds(cx - 100, bottomBarY, 50, 18).build());
         addRenderableWidget(Button.builder(Component.literal("⏭"), b -> p.next())
-                .bounds(cx + 20, ctrlY, 40, 20).build());
-        // 循环
-        String loopText = p.isLoopMode() ? "🔁" : "➡";
-        addRenderableWidget(Button.builder(Component.literal(loopText), b -> {
+                .bounds(cx + 20, bottomBarY, 36, 18).build());
+        addRenderableWidget(Button.builder(Component.literal(p.isLoopMode() ? "🔁" : "➡"), b -> {
                     p.setLoopMode(!p.isLoopMode());
                     b.setMessage(Component.literal(p.isLoopMode() ? "🔁" : "➡"));
                 })
-                .bounds(cx + 70, ctrlY, 40, 20).build());
-        // 音量+
+                .bounds(cx + 65, bottomBarY, 36, 18).build());
         addRenderableWidget(Button.builder(Component.literal("🔊"), b -> p.setVolume(p.getVolume() + 0.1f))
-                .bounds(cx + 120, ctrlY, 30, 20).build());
+                .bounds(cx + 110, bottomBarY, 26, 18).build());
 
-        // 顶部导航
-        int topY = 10;
+        // 顶部紧凑导航栏
+        int topY = 6;
         int navY = topY;
-        addRenderableWidget(Button.builder(Component.literal("≡ 我的歌单"), b -> minecraft.setScreen(new PlaylistBrowserScreen()))
-                .bounds(10, navY, 90, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("🔍 搜索"), b -> minecraft.setScreen(new SearchScreen()))
-                .bounds(105, navY, 70, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("⚙ 设置"), b -> minecraft.setScreen(new SettingsScreen()))
-                .bounds(180, navY, 60, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("歌单"), b -> minecraft.setScreen(new PlaylistBrowserScreen()))
+                .bounds(8, navY, 40, 16).build());
+        addRenderableWidget(Button.builder(Component.literal("搜索"), b -> minecraft.setScreen(new SearchScreen()))
+                .bounds(50, navY, 40, 16).build());
+        addRenderableWidget(Button.builder(Component.literal("设置"), b -> minecraft.setScreen(new SettingsScreen()))
+                .bounds(92, navY, 40, 16).build());
 
-        // 右上角登录/账号
-        String acctText = NeteaseSession.getInstance().isLoggedIn() ? "👤 账号" : "🔒 登录";
+        String acctText = NeteaseSession.getInstance().isLoggedIn() ? "账号" : "登录";
         addRenderableWidget(Button.builder(Component.literal(acctText), b -> minecraft.setScreen(new LoginScreen()))
-                .bounds(this.width - 170, navY, 70, 20).build());
-
-        // 返回游戏
-        addRenderableWidget(Button.builder(Component.literal("✕ 关闭"), b -> onClose())
-                .bounds(this.width - 80, navY, 60, 20).build());
+                .bounds(this.width - 130, navY, 40, 16).build());
+        addRenderableWidget(Button.builder(Component.literal("✕"), b -> onClose())
+                .bounds(this.width - 22, navY, 14, 16).build());
     }
 
     @Override
@@ -96,84 +85,71 @@ public class PlayerScreen extends Screen
         MusicPlayer p = MusicPlayer.getInstance();
         NeteaseSong song = p.getCurrentSong();
 
-        // === 顶部歌曲信息卡片 ===
-        int cardW = Math.min(560, this.width - 40);
+        // === 顶部歌曲信息卡片（紧凑） ===
+        int cardW = Math.min(520, this.width - 40);
         int cardX = cx - cardW / 2;
-        int cardY = 40;
-        int cardH = 110;
+        int cardY = 28;
+        int cardH = 56;
 
-        ModernUI.drawCard(g, cardX, cardY, cardW, cardH);
-
-        // 左侧色条
+        ModernUI.drawCard(g, cardX, cardY, cardW, cardH, 0.5, true);
         int accent = ZephyrConfig.getAccentColor();
-        g.fill(cardX + 1, cardY + 8, cardX + 4, cardY + cardH - 8, accent);
+        g.fill(cardX + 1, cardY + 6, cardX + 4, cardY + cardH - 6, accent);
 
-        int textX = cardX + 16;
-        int textY = cardY + 14;
+        int textX = cardX + 14;
+        int textY = cardY + 8;
 
         if (song == null)
         {
-            g.drawCenteredString(this.font, Component.literal("当前没有播放"), cx, cardY + 40, 0xFFAAAAAA);
-            g.drawCenteredString(this.font, Component.literal("按 F7 浏览歌单 或 F10 搜索"), cx, cardY + 56, 0xFF888888);
+            g.drawCenteredString(this.font, Component.literal("当前没有播放"), cx, cardY + 22, 0xFFAAAAAA);
             super.render(g, mouseX, mouseY, partialTick);
             return;
         }
 
-        // 歌曲名（大字）
-        String songName = truncate(song.name, 40);
-        g.drawString(this.font, Component.literal("♪ " + songName), textX, textY, 0xFFFFFFFF, false);
+        // 歌曲名 + 状态
+        String songName = truncate(song.name, 35);
+        String statePrefix = p.isPaused() ? "⏸ " : (p.isPlaying() ? "▶ " : "■ ");
+        g.drawString(this.font, Component.literal(statePrefix + songName), textX, textY, 0xFFFFFFFF, false);
 
-        // 艺术家 + 专辑
-        textY += 14;
-        String meta = song.getDisplayArtist() + " · " + (song.album == null || song.album.isEmpty() ? "未知专辑" : song.album);
-        g.drawString(this.font, Component.literal(truncate(meta, 60)), textX, textY, 0xFFCCCCCC, false);
-
-        // 用户信息（右上）
+        // 艺术家（右上角）
         NeteaseUser u = NeteaseSession.getInstance().getCurrentUser();
         if (u != null)
         {
-            String uInfo = "👤 " + u.nickname;
+            String uInfo = "👤 " + truncate(u.nickname, 10);
             int uw = this.font.width(uInfo);
-            g.drawString(this.font, Component.literal(uInfo), cardX + cardW - uw - 16, cardY + 14, accent, false);
+            g.drawString(this.font, Component.literal(uInfo), cardX + cardW - uw - 14, textY, accent, false);
         }
 
-        // 状态徽章
-        textY += 14;
-        String status = p.isPaused() ? "⏸ 已暂停" : (p.isPlaying() ? "▶ 正在播放" : "■ 已停止");
-        g.drawString(this.font, Component.literal(status), textX, textY, accent, false);
+        // 艺术家 + 专辑（小字）
+        textY += 12;
+        String meta = song.getDisplayArtist() + " · " + (song.album == null || song.album.isEmpty() ? "未知" : truncate(song.album, 18));
+        g.drawString(this.font, Component.literal(truncate(meta, 50)), textX, textY, 0xFFCCCCCC, false);
 
-        // 队列信息
+        // 队列信息（右上）
         if (!p.getQueue().isEmpty())
         {
             String qInfo = "队列 " + (p.getQueueIndex() + 1) + "/" + p.getQueue().size();
             int qw = this.font.width(qInfo);
-            g.drawString(this.font, Component.literal(qInfo), cardX + cardW - qw - 16, textY, 0xFFAAAAAA, false);
+            g.drawString(this.font, Component.literal(qInfo), cardX + cardW - qw - 14, textY, 0xFF888888, false);
         }
 
-        // 进度条
-        textY += 16;
+        // 进度条（底部）
+        textY += 14;
         double pos = p.getPositionSec();
         double total = song.duration > 0 ? song.duration / 1000.0 : 0;
         double progress = total > 0 ? Math.min(1, pos / total) : 0;
-
-        int barX = textX;
-        int barW = cardW - 32;
-        int barY = textY;
-        ModernUI.drawProgressBar(g, barX, barY, barW, 6, progress);
-
-        // 时间
+        ModernUI.drawProgressBar(g, textX, textY, cardW - 28, 4, progress);
         String timeStr = formatTime(pos) + " / " + formatTime(total);
-        g.drawString(this.font, Component.literal(timeStr), barX, barY + 10, 0xFFAAAAAA, false);
+        g.drawString(this.font, Component.literal(timeStr), textX, textY + 6, 0xFF888888, false);
 
-        // === 歌词面板 ===
-        int lyricY = cardY + cardH + 20;
-        int lyricH = this.height - 50 - lyricY - 10;
-        if (lyricH < 80) lyricH = 80;
-        int lyricW = Math.min(600, this.width - 60);
+        // === 大型歌词面板（当前歌词居中） ===
+        int lyricY = cardY + cardH + 16;
+        int lyricH = this.height - 36 - lyricY - 8;
+        if (lyricH < 100) lyricH = 100;
+        int lyricW = Math.min(700, this.width - 60);
         int lyricX = cx - lyricW / 2;
 
-        // 歌词背景卡片
-        ModernUI.drawCard(g, lyricX, lyricY, lyricW, lyricH);
+        // 不画背景卡片（半透明显示，让歌词更醒目）
+        // ModernUI.drawCard(g, lyricX, lyricY, lyricW, lyricH, 0.35, false);
 
         List<LyricLine> lyrics = p.getCurrentLyrics();
         if (lyrics == null || lyrics.isEmpty())
@@ -191,33 +167,49 @@ public class PlayerScreen extends Screen
             }
             else
             {
-                int maxLines = Math.max(3, lyricH / 18);
+                // 居中布局：当前行始终在面板正中
+                int lineH = 20;  // 大字体行高
+                int centerY = lyricY + lyricH / 2;
+                int maxLines = Math.max(5, Math.min(11, lyricH / lineH));
                 int half = maxLines / 2;
-                int startIdx = Math.max(0, curIdx - half);
-                int endIdx = Math.min(lyrics.size() - 1, startIdx + maxLines - 1);
-                startIdx = Math.max(0, endIdx - maxLines + 1);
 
-                int lineY = lyricY + (lyricH - maxLines * 18) / 2;
                 int activeColor = ZephyrConfig.LYRIC_ACTIVE_COLOR.get();
                 int otherColor = ZephyrConfig.LYRIC_OTHER_COLOR.get();
 
-                for (int i = startIdx; i <= endIdx; i++)
+                for (int offset = -half; offset <= half; offset++)
                 {
-                    LyricLine line = lyrics.get(i);
-                    boolean isActive = (i == curIdx);
+                    int idx = curIdx + offset;
+                    if (idx < 0 || idx >= lyrics.size()) continue;
 
-                    if (isActive && line.isYrc && ZephyrConfig.LYRIC_KARAOKE.get())
+                    LyricLine line = lyrics.get(idx);
+                    boolean isActive = (offset == 0);
+                    int lineY = centerY + offset * lineH - lineH / 2;
+
+                    // 离中心越远越淡
+                    int alpha;
+                    if (isActive)
                     {
-                        renderKaraokeLineCentered(g, line, cx, lineY, lyricW - 40, pos, activeColor);
+                        alpha = 255;
                     }
                     else
                     {
-                        String text = truncate(line.text, 50);
-                        int color = isActive ? activeColor : otherColor;
+                        double fadeRatio = 1.0 - Math.abs(offset) / (double) (half + 1);
+                        alpha = (int) (140 * fadeRatio);
+                        if (alpha < 40) alpha = 40;
+                    }
+
+                    int color = isActive ? activeColor : ModernUI.withAlpha(otherColor, alpha);
+
+                    if (isActive && line.isYrc && ZephyrConfig.LYRIC_KARAOKE.get())
+                    {
+                        renderKaraokeLineCentered(g, line, cx, lineY, lyricW - 80, pos);
+                    }
+                    else
+                    {
+                        String text = truncate(line.text, 55);
                         int tw = this.font.width(text);
                         g.drawString(this.font, Component.literal(text), cx - tw / 2, lineY, color, false);
                     }
-                    lineY += 18;
                 }
             }
         }
@@ -225,17 +217,19 @@ public class PlayerScreen extends Screen
         super.render(g, mouseX, mouseY, partialTick);
     }
 
-    private void renderKaraokeLineCentered(GuiGraphics g, LyricLine line, int cx, int y, int maxW, double pos, int activeColor)
+    private void renderKaraokeLineCentered(GuiGraphics g, LyricLine line, int cx, int y, int maxW, double pos)
     {
         int playedColor = ZephyrConfig.LYRIC_WORD_PLAYED_COLOR.get();
         int currentColor = ZephyrConfig.LYRIC_WORD_CURRENT_COLOR.get();
         int unplayedColor = ZephyrConfig.LYRIC_WORD_UNPLAYED_COLOR.get();
 
-        // 计算整行宽度
         StringBuilder fullText = new StringBuilder();
         for (LyricWord w : line.words) fullText.append(w.text);
         String text = fullText.toString();
-        if (text.length() > 50) text = text.substring(0, 50) + "…";
+        if (this.font.width(text) > maxW)
+        {
+            text = truncate(text, 55);
+        }
         int totalW = this.font.width(text);
         int startX = cx - totalW / 2;
 
