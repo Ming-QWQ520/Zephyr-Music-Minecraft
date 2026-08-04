@@ -63,6 +63,16 @@ public class NeteaseSession
         return api.loginStatus().thenApply(resp -> {
             try
             {
+                // 调试：记录 loginStatus 响应的关键字段
+                ZephyrMusic.LOGGER.info("[Zephyr] loginStatus response keys: {}", resp.keySet());
+                if (resp.has("data") && resp.get("data").isJsonObject())
+                {
+                    JsonObject d = resp.getAsJsonObject("data");
+                    ZephyrMusic.LOGGER.info("[Zephyr] loginStatus.data keys: {}, data.code={}",
+                            d.keySet(),
+                            d.has("code") ? d.get("code").getAsInt() : "N/A");
+                }
+
                 NeteaseUser u = NeteaseApi.parseUser(resp);
                 if (u != null && u.userId != 0)
                 {
@@ -71,6 +81,7 @@ public class NeteaseSession
                     ZephyrMusic.LOGGER.info("[Zephyr] Logged in as {} ({})", u.nickname, u.userId);
                     return true;
                 }
+                ZephyrMusic.LOGGER.warn("[Zephyr] checkLoginStatus: no valid profile in response");
                 loggedIn = false;
                 return false;
             }

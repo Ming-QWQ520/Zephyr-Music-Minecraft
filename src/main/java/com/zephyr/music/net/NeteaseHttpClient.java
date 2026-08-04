@@ -1,6 +1,5 @@
 package com.zephyr.music.net;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.zephyr.music.ZephyrMusic;
@@ -13,6 +12,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -21,13 +21,15 @@ import java.util.concurrent.Executors;
 /**
  * 网易云 API HTTP 客户端封装（基于 Java 11+ HttpClient）
  *
- * - GET/POST 请求，自动带 Cookie
- * - 异步响应，不阻塞 Minecraft 主线程
- * - 自动解包 api-enhanced 的 data 字段
+ * ★ 关键修复：
+ *   1. Cookie 同时通过 URL 参数 cookie=... 和 Cookie 请求头发送
+ *      （api-enhanced NeteaseCloudMusicApi 主要从 URL 参数读取 cookie，
+ *       因为浏览器 CORS 限制无法设置 Cookie 头）
+ *   2. Cookie 字符串在保存和发送前去除换行/控制字符，防止破坏 HTTP header
+ *   3. 异步响应，不阻塞 Minecraft 主线程
  */
 public class NeteaseHttpClient
 {
-    private static final Gson GSON = new Gson();
     private static NeteaseHttpClient instance;
 
     private final HttpClient client;
@@ -63,7 +65,6 @@ public class NeteaseHttpClient
         {
             base = "https://musicapi.mingqwq.top";
         }
-        // 去掉末尾斜杠
         return base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
     }
 
@@ -73,9 +74,10 @@ public class NeteaseHttpClient
         return c == null ? "" : c;
     }
 
+    /** 保存 cookie 时清理换行符和控制字符 */
     public void setCookie(String cookie)
     {
-        ZephyrConfig.COOKIE.set(cookie == null ? "" : cookie);
+        ZephyrConfig.COOKIE.set(sanitizeCookie(cookie));
     }
 
     public void clearCookie()
@@ -83,32 +85,63 @@ public class NeteaseHttpClient
         ZephyrConfig.COOKIE.set("");
     }
 
+    /** 清理 cookie 中的换行/控制字符（防止破坏 HTTP header） */
+    private static String sanitizeCookie(String s)
+    {
+        if (s == null) return "";
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++)
+        {
+            char c = s.charAt(i);
+            // 只保留可见 ASCII 字符（0x20-0x7E）和扩展字符（0x80-0xFF）
+            if (c == 0x20 || (c >= 0x21 && c != 0x7F) || c >= 0x80)
+            {
+                sb.append(c);
+            }
+        }
+        return sb.toString().trim();
+    }
+
+    /**
+     * 构建查询参数 Map：自动加入 timestamp 和 cookie（如有）
+     */
+    private LinkedHashMap<String, String> buildParams(Map<String, String> params)
+    {
+        LinkedHashMap<String, String> all = new LinkedHashMap<>();
+        if (params != null) all.putAll(params);
+        all.put("timestamp", String.valueOf(System.currentTimeMillis()));
+        // ★ 关键：cookie 通过 URL 参数传递（api-enhanced 主要从这里读取）
+        String cookie = getCookie();
+        if (cookie != null && !cookie.isEmpty())
+        {
+            all.put("cookie", cookie);
+        }
+        return all;
+    }
+
+    private String buildQueryString(Map<String, String> params)
+    {
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        for (Map.Entry<String, String> e : params.entrySet())
+        {
+            if (!first) sb.append("&");
+            sb.append(URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8))
+               .append("=")
+               .append(URLEncoder.encode(e.getValue() == null ? "" : e.getValue(), StandardCharsets.UTF_8));
+            first = false;
+        }
+        return sb.toString();
+    }
+
     /**
      * 异步 GET 请求
-     *
-     * @param path   接口路径，例如 /login/qr/key
-     * @param params 查询参数
-     * @return CompletableFuture<JsonObject> 解包后的 JSON 响应
      */
     public CompletableFuture<JsonObject> get(String path, Map<String, String> params)
     {
         StringBuilder url = new StringBuilder(getApiBase()).append(path);
-        if (params != null && !params.isEmpty())
-        {
-            url.append("?");
-            boolean first = true;
-            for (Map.Entry<String, String> e : params.entrySet())
-            {
-                if (!first) url.append("&");
-                url.append(URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8))
-                   .append("=")
-                   .append(URLEncoder.encode(sanitize(e.getValue()), StandardCharsets.UTF_8));
-                first = false;
-            }
-        }
-        // 添加时间戳避免缓存
-        url.append(params == null || params.isEmpty() ? "?" : "&")
-           .append("timestamp=").append(System.currentTimeMillis());
+        LinkedHashMap<String, String> allParams = buildParams(params);
+        url.append("?").append(buildQueryString(allParams));
 
         HttpRequest.Builder rb = HttpRequest.newBuilder()
                 .uri(URI.create(url.toString()))
@@ -117,10 +150,18 @@ public class NeteaseHttpClient
                 .header("Accept", "application/json")
                 .GET();
 
+        // 同时通过 Cookie 头发送（兼容部分服务器配置）
         String cookie = getCookie();
         if (cookie != null && !cookie.isEmpty())
         {
-            rb.header("Cookie", cookie);
+            try
+            {
+                rb.header("Cookie", cookie);
+            }
+            catch (IllegalArgumentException e)
+            {
+                ZephyrMusic.LOGGER.warn("[Zephyr] Cookie header rejected: {}", e.getMessage());
+            }
         }
 
         return client.sendAsync(rb.build(), HttpResponse.BodyHandlers.ofString())
@@ -144,23 +185,8 @@ public class NeteaseHttpClient
      */
     public CompletableFuture<JsonObject> post(String path, Map<String, String> params)
     {
-        StringBuilder form = new StringBuilder();
-        if (params != null && !params.isEmpty())
-        {
-            boolean first = true;
-            for (Map.Entry<String, String> e : params.entrySet())
-            {
-                if (!first) form.append("&");
-                form.append(URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8))
-                    .append("=")
-                    .append(URLEncoder.encode(sanitize(e.getValue()), StandardCharsets.UTF_8));
-                first = false;
-            }
-        }
-        form.append(params == null || params.isEmpty() ? "" : "&")
-            .append("timestamp=").append(System.currentTimeMillis());
-
-        String body = form.toString();
+        LinkedHashMap<String, String> allParams = buildParams(params);
+        String body = buildQueryString(allParams);
         String url = getApiBase() + path;
 
         HttpRequest.Builder rb = HttpRequest.newBuilder()
@@ -174,7 +200,14 @@ public class NeteaseHttpClient
         String cookie = getCookie();
         if (cookie != null && !cookie.isEmpty())
         {
-            rb.header("Cookie", cookie);
+            try
+            {
+                rb.header("Cookie", cookie);
+            }
+            catch (IllegalArgumentException e)
+            {
+                ZephyrMusic.LOGGER.warn("[Zephyr] Cookie header rejected: {}", e.getMessage());
+            }
         }
 
         return client.sendAsync(rb.build(), HttpResponse.BodyHandlers.ofString())
@@ -257,20 +290,5 @@ public class NeteaseHttpClient
             err.addProperty("message", "parse error: " + e.getMessage());
             return err;
         }
-    }
-
-    /** 去掉 ASCII 控制字符 */
-    private static String sanitize(String s)
-    {
-        if (s == null) return "";
-        StringBuilder sb = new StringBuilder(s.length());
-        for (char c : s.toCharArray())
-        {
-            if (c >= 0x20 && c != 0x7F)
-            {
-                sb.append(c);
-            }
-        }
-        return sb.toString();
     }
 }

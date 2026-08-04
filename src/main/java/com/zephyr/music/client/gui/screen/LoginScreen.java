@@ -325,13 +325,18 @@ public class LoginScreen extends Screen
                     }
                     else if (code == 803)
                     {
-                        statusMessage = "登录成功！正在跳转…";
+                        // ★ 先立即取消 timer，防止再次轮询返回 800 误判失败
+                        if (qrTimer != null) { qrTimer.cancel(); qrTimer = null; }
+
+                        statusMessage = "登录成功！正在同步状态…";
                         statusColor = 0xFF1DB954;
                         String cookie = NeteaseApi.extractCookie(resp);
+                        ZephyrMusic.LOGGER.info("[Zephyr] QR 803 received, cookie length: {}",
+                                cookie == null ? 0 : cookie.length());
                         if (cookie != null && !cookie.isEmpty())
                         {
                             NeteaseHttpClient.getInstance().setCookie(cookie);
-                            ZephyrMusic.LOGGER.info("[Zephyr] Cookie saved via QR login");
+                            ZephyrMusic.LOGGER.info("[Zephyr] Cookie saved via QR login, refreshing user...");
                             // 自动刷新用户信息并跳转
                             NeteaseSession.getInstance().refreshUser().thenAccept(ok -> {
                                 ZephyrMusic.LOGGER.info("[Zephyr] refreshUser result: {}", ok);
@@ -349,12 +354,23 @@ public class LoginScreen extends Screen
                                 }
                                 else
                                 {
-                                    statusMessage = "登录态获取失败，请重试";
-                                    statusColor = 0xFFFF5555;
+                                    // refreshUser 失败但 cookie 已保存，仍然跳转
+                                    // 用户可以在歌单界面手动刷新
+                                    ZephyrMusic.LOGGER.warn("[Zephyr] refreshUser failed, but cookie is saved. Redirecting anyway.");
+                                    statusMessage = "已登录，正在加载歌单…";
+                                    statusColor = 0xFFFFFF55;
+                                    Minecraft.getInstance().execute(() -> {
+                                        Minecraft.getInstance().setScreen(new PlaylistBrowserScreen());
+                                    });
                                 }
                             });
                         }
-                        if (qrTimer != null) { qrTimer.cancel(); qrTimer = null; }
+                        else
+                        {
+                            ZephyrMusic.LOGGER.error("[Zephyr] QR 803 but no cookie in response: {}", resp);
+                            statusMessage = "登录响应缺少 cookie，请重试";
+                            statusColor = 0xFFFF5555;
+                        }
                     }
                 });
             }
