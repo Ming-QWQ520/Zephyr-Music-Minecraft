@@ -72,8 +72,11 @@ public class SettingsScreen extends Screen
                     Arrays.asList("top_left", "top_right", "bottom_left", "bottom_right")));
             addEntry(new SliderEntryI("HUD X 偏移", ZephyrConfig.HUD_X, 0, 3840));
             addEntry(new SliderEntryI("HUD Y 偏移", ZephyrConfig.HUD_Y, 0, 2160));
-            addEntry(new SliderEntryI("面板宽度", ZephyrConfig.HUD_PANEL_WIDTH, 120, 600));
+            addEntry(new SliderEntryI("面板宽度", ZephyrConfig.HUD_PANEL_WIDTH, 100, 600));
             addEntry(new SliderEntryD("背景透明度", ZephyrConfig.HUD_BG_OPACITY, 0.0, 1.0));
+            addEntry(new ToggleEntry("显示边框", ZephyrConfig.HUD_SHOW_BORDER, Arrays.asList("OFF", "ON")));
+            addEntry(new ToggleEntry("显示封面", ZephyrConfig.HUD_SHOW_COVER, Arrays.asList("OFF", "ON")));
+            addEntry(new SliderEntryI("封面大小", ZephyrConfig.HUD_COVER_SIZE, 16, 256));
             addEntry(new ToggleEntry("紧凑模式", ZephyrConfig.HUD_COMPACT, Arrays.asList("OFF", "ON")));
             addEntry(new ToggleEntry("显示进度条", ZephyrConfig.HUD_SHOW_PROGRESS_BAR, Arrays.asList("OFF", "ON")));
             addEntry(new SliderEntryD("音量", ZephyrConfig.HUD_VOLUME, 0.0, 1.0));

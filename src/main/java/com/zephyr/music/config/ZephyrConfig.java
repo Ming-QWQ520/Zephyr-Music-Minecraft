@@ -30,6 +30,8 @@ public class ZephyrConfig
     public static final ForgeConfigSpec.IntValue HUD_PANEL_WIDTH;
     public static final ForgeConfigSpec.DoubleValue HUD_BG_OPACITY;
     public static final ForgeConfigSpec.BooleanValue HUD_SHOW_COVER;
+    public static final ForgeConfigSpec.IntValue HUD_COVER_SIZE;
+    public static final ForgeConfigSpec.BooleanValue HUD_SHOW_BORDER;
 
     // 歌词样式
     public static final ForgeConfigSpec.ConfigValue<String> LYRIC_MODE;
@@ -76,9 +78,13 @@ public class ZephyrConfig
         HUD_SHOW_LYRICS = BUILDER.define("hud_show_lyrics", true);
         HUD_LYRICS_LINES = BUILDER.defineInRange("hud_lyrics_lines", 3, 1, 12);
         HUD_PANEL_WIDTH = BUILDER.defineInRange("hud_panel_width", 220, 100, 600);
-        HUD_BG_OPACITY = BUILDER.defineInRange("hud_bg_opacity", 0.55, 0.0, 1.0);
-        HUD_SHOW_COVER = BUILDER.comment("Show album cover thumbnail (downloads image)")
-                .define("hud_show_cover", false);
+        HUD_BG_OPACITY = BUILDER.defineInRange("hud_bg_opacity", 0.0, 0.0, 1.0);
+        HUD_SHOW_COVER = BUILDER.comment("Show album cover thumbnail")
+                .define("hud_show_cover", true);
+        HUD_COVER_SIZE = BUILDER.comment("Cover image size (pixels)")
+                .defineInRange("hud_cover_size", 64, 16, 256);
+        HUD_SHOW_BORDER = BUILDER.comment("Show panel border")
+                .define("hud_show_border", false);
         BUILDER.pop();
 
         BUILDER.push("lyric");

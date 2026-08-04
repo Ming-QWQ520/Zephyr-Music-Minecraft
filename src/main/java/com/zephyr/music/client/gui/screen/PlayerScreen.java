@@ -90,17 +90,24 @@ public class PlayerScreen extends Screen
         final int COLOR_TEXT = 0xFFFFFFFF;
         final int COLOR_DIM = 0xFFAAAAAA;
         final int COLOR_LYRIC_NEXT = 0xFFCCCCCC;
-        final int COLOR_PANEL = 0xE0452A1F;
 
-        // === 顶部歌曲信息卡片（带唱片机图标） ===
+        // === 顶部歌曲信息卡片（带封面图） ===
         int cardW = Math.min(560, this.width - 40);
         int cardX = cx - cardW / 2;
         int cardY = 28;
-        int cardH = 68;
-        int recordSize = 48;
+        int cardH = 80;
+        int coverSize = 64;
 
-        ModernUI.fillRound(g, cardX, cardY, cardW, cardH, 8, COLOR_PANEL);
-        ModernUI.strokeRound(g, cardX, cardY, cardW, cardH, 8, 0x80FFA000, 1);
+        // 默认无背景无边框（按配置）
+        double bgOpacity = ZephyrConfig.HUD_BG_OPACITY.get();
+        if (bgOpacity > 0.001)
+        {
+            ModernUI.fillRound(g, cardX, cardY, cardW, cardH, 8, ZephyrConfig.getBgColor(bgOpacity));
+        }
+        if (ZephyrConfig.HUD_SHOW_BORDER.get())
+        {
+            ModernUI.strokeRound(g, cardX, cardY, cardW, cardH, 8, 0x80FFA000, 1);
+        }
 
         if (song == null)
         {
@@ -110,13 +117,17 @@ public class PlayerScreen extends Screen
             return;
         }
 
-        // 左侧唱片机图标
-        drawRecordPlayer(g, cardX + 10, cardY + (cardH - recordSize) / 2, recordSize, p.isPlaying(), partialTick);
+        // 左侧封面图
+        if (ZephyrConfig.HUD_SHOW_COVER.get())
+        {
+            renderCover(g, this.font, song.picUrl, cardX + 8, cardY + (cardH - coverSize) / 2, coverSize);
+        }
 
         // 右侧信息
-        int textX = cardX + 10 + recordSize + 12;
+        int coverOffset = ZephyrConfig.HUD_SHOW_COVER.get() ? coverSize + 16 : 14;
+        int textX = cardX + coverOffset;
         int textY = cardY + 10;
-        int textW = cardW - (textX - cardX) - 14;
+        int textW = cardW - coverOffset - 14;
 
         // 歌曲名（带状态前缀，白色）
         String statePrefix = p.isPaused() ? "⏸ " : (p.isPlaying() ? "▶ " : "■ ");
@@ -242,86 +253,36 @@ public class PlayerScreen extends Screen
         super.render(g, mouseX, mouseY, partialTick);
     }
 
-    /** 绘制唱片机图标（像素风格，AllMusic 风格） */
-    private void drawRecordPlayer(GuiGraphics g, int x, int y, int size, boolean isPlaying, float partialTick)
+    /** 渲染封面图（PlayerScreen 用大图） */
+    private void renderCover(GuiGraphics g, net.minecraft.client.gui.Font font, String picUrl, int x, int y, int size)
     {
-        int COLOR_RECORD = 0xFF5D4037;
-        int COLOR_ACCENT = 0xFF00FFFF;
-
-        // 底座
-        ModernUI.fillRound(g, x, y, size, size, 4, COLOR_RECORD);
-        g.fill(x, y, x + size, y + 1, 0xFF8D6E63);
-        g.fill(x, y + size - 1, x + size, y + size, 0xFF3E2723);
-
-        // 唱片
-        int discSize = size - 8;
-        int discX = x + 4;
-        int discY = y + 4;
-        fillCircle(g, discX + discSize / 2, discY + discSize / 2, discSize / 2, 0xFF1A1A1A);
-
-        int cx = discX + discSize / 2;
-        int cy = discY + discSize / 2;
-        for (int r = discSize / 2 - 2; r > 4; r -= 3)
+        if (picUrl == null || picUrl.isEmpty())
         {
-            drawCircleRing(g, cx, cy, r, 0xFF333333);
+            // 占位
+            g.fill(x, y, x + size, y + size, 0xFF1A1A1A);
+            String t = "♪";
+            int tw = font.width(t);
+            g.drawString(font, Component.literal(t), x + (size - tw) / 2, y + size / 2 - 4, 0xFF888888, false);
+            return;
         }
 
-        // 中央标签
-        int labelR = discSize / 4;
-        int labelColor = isPlaying ? COLOR_ACCENT : 0xFFFF6B35;
-        fillCircle(g, cx, cy, labelR, labelColor);
-        fillCircle(g, cx, cy, 2, 0xFFFFFFFF);
-
-        // 旋转指示线
-        if (isPlaying)
+        com.zephyr.music.client.audio.CoverTextureManager tm = com.zephyr.music.client.audio.CoverTextureManager.getInstance();
+        net.minecraft.resources.ResourceLocation texId = tm.getCover(picUrl, null);
+        if (texId != null)
         {
-            float angle = (System.currentTimeMillis() / 50f + partialTick * 10) % 360;
-            double rad = Math.toRadians(angle);
-            int lineLen = labelR - 2;
-            int ex = cx + (int) (Math.cos(rad) * lineLen);
-            int ey = cy + (int) (Math.sin(rad) * lineLen);
-            drawLine(g, cx, cy, ex, ey, COLOR_ACCENT);
+            com.mojang.blaze3d.systems.RenderSystem.setShaderTexture(0, texId);
+            com.mojang.blaze3d.systems.RenderSystem.enableBlend();
+            com.mojang.blaze3d.systems.RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
+            g.blit(texId, x, y, 0, 0, size, size, size, size);
+            com.mojang.blaze3d.systems.RenderSystem.disableBlend();
         }
-
-        // 底部按钮
-        int btnY = y + size - 6;
-        fillCircle(g, x + 8, btnY, 3, 0xFF888888);
-        fillCircle(g, x + 14, btnY, 3, isPlaying ? 0xFFFF5555 : 0xFF444444);
-    }
-
-    private void fillCircle(GuiGraphics g, int cx, int cy, int r, int color)
-    {
-        if (r <= 0) return;
-        for (int dy = -r; dy <= r; dy++)
+        else
         {
-            int dx = (int) Math.round(Math.sqrt(r * r - dy * dy));
-            g.fill(cx - dx, cy + dy, cx + dx + 1, cy + dy + 1, color);
-        }
-    }
-
-    private void drawCircleRing(GuiGraphics g, int cx, int cy, int r, int color)
-    {
-        if (r <= 0) return;
-        for (int dy = -r; dy <= r; dy++)
-        {
-            int dx = (int) Math.round(Math.sqrt(r * r - dy * dy));
-            if (dy == -r || dy == r || dx == r)
-            {
-                g.fill(cx - dx, cy + dy, cx - dx + 1, cy + dy + 1, color);
-                g.fill(cx + dx, cy + dy, cx + dx + 1, cy + dy + 1, color);
-            }
-        }
-    }
-
-    private void drawLine(GuiGraphics g, int x1, int y1, int x2, int y2, int color)
-    {
-        int steps = Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1));
-        if (steps == 0) return;
-        for (int i = 0; i <= steps; i++)
-        {
-            int x = x1 + (x2 - x1) * i / steps;
-            int y = y1 + (y2 - y1) * i / steps;
-            g.fill(x, y, x + 1, y + 1, color);
+            // 加载中
+            g.fill(x, y, x + size, y + size, 0xFF1A1A1A);
+            String t = "...";
+            int tw = font.width(t);
+            g.drawString(font, Component.literal(t), x + (size - tw) / 2, y + size / 2 - 4, 0xFF888888, false);
         }
     }
 
