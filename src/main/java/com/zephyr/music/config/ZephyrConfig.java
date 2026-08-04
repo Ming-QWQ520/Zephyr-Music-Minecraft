@@ -89,21 +89,23 @@ public class ZephyrConfig
         LYRIC_SCROLL = BUILDER.comment("Smooth scroll lyric lines")
                 .define("lyric_scroll", true);
         LYRIC_FONT_SIZE = BUILDER.defineInRange("lyric_font_size", 9, 6, 16);
+        // AllMusic 风格：当前歌词青色，其他歌词浅灰
         LYRIC_ACTIVE_COLOR = BUILDER.comment("Active line color (ARGB int)")
-                .defineInRange("lyric_active_color", 0xFF1DB954, Integer.MIN_VALUE, Integer.MAX_VALUE);
-        LYRIC_OTHER_COLOR = BUILDER.defineInRange("lyric_other_color", 0xFF888888, Integer.MIN_VALUE, Integer.MAX_VALUE);
-        LYRIC_WORD_PLAYED_COLOR = BUILDER.defineInRange("lyric_word_played_color", 0xFF1DB954, Integer.MIN_VALUE, Integer.MAX_VALUE);
-        LYRIC_WORD_CURRENT_COLOR = BUILDER.defineInRange("lyric_word_current_color", 0xFF4ADE80, Integer.MIN_VALUE, Integer.MAX_VALUE);
-        LYRIC_WORD_UNPLAYED_COLOR = BUILDER.defineInRange("lyric_word_unplayed_color", 0xFF666666, Integer.MIN_VALUE, Integer.MAX_VALUE);
+                .defineInRange("lyric_active_color", 0xFF00FFFF, Integer.MIN_VALUE, Integer.MAX_VALUE);
+        LYRIC_OTHER_COLOR = BUILDER.defineInRange("lyric_other_color", 0xFFCCCCCC, Integer.MIN_VALUE, Integer.MAX_VALUE);
+        LYRIC_WORD_PLAYED_COLOR = BUILDER.defineInRange("lyric_word_played_color", 0xFF00FFFF, Integer.MIN_VALUE, Integer.MAX_VALUE);
+        LYRIC_WORD_CURRENT_COLOR = BUILDER.defineInRange("lyric_word_current_color", 0xFF80FFFF, Integer.MIN_VALUE, Integer.MAX_VALUE);
+        LYRIC_WORD_UNPLAYED_COLOR = BUILDER.defineInRange("lyric_word_unplayed_color", 0xFF888888, Integer.MIN_VALUE, Integer.MAX_VALUE);
         BUILDER.pop();
 
         BUILDER.push("theme");
+        // AllMusic 风格：青色主题 + 木质背景
         THEME_PRIMARY = BUILDER.comment("Primary theme color (hex)")
-                .define("theme_primary", "#1DB954");
+                .define("theme_primary", "#00FFFF");
         THEME_ACCENT = BUILDER.comment("Accent theme color (hex)")
-                .define("theme_accent", "#4ADE80");
+                .define("theme_accent", "#00FFFF");
         THEME_BG = BUILDER.comment("Background theme color (hex)")
-                .define("theme_bg", "#0A0A0A");
+                .define("theme_bg", "#2A1F12");
         BUILDER.pop();
 
         SPEC = BUILDER.build();

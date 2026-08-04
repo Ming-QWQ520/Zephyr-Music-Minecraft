@@ -85,44 +85,57 @@ public class PlayerScreen extends Screen
         MusicPlayer p = MusicPlayer.getInstance();
         NeteaseSong song = p.getCurrentSong();
 
-        // === 顶部歌曲信息卡片（紧凑） ===
-        int cardW = Math.min(520, this.width - 40);
+        // AllMusic 风格配色
+        final int COLOR_ACCENT = 0xFF00FFFF;       // 青色强调
+        final int COLOR_TEXT = 0xFFFFFFFF;
+        final int COLOR_DIM = 0xFFAAAAAA;
+        final int COLOR_LYRIC_NEXT = 0xFFCCCCCC;
+        final int COLOR_PANEL = 0xE0452A1F;
+
+        // === 顶部歌曲信息卡片（带唱片机图标） ===
+        int cardW = Math.min(560, this.width - 40);
         int cardX = cx - cardW / 2;
         int cardY = 28;
-        int cardH = 56;
+        int cardH = 68;
+        int recordSize = 48;
 
-        ModernUI.drawCard(g, cardX, cardY, cardW, cardH, 0.5, true);
-        int accent = ZephyrConfig.getAccentColor();
-        g.fill(cardX + 1, cardY + 6, cardX + 4, cardY + cardH - 6, accent);
-
-        int textX = cardX + 14;
-        int textY = cardY + 8;
+        ModernUI.fillRound(g, cardX, cardY, cardW, cardH, 8, COLOR_PANEL);
+        ModernUI.strokeRound(g, cardX, cardY, cardW, cardH, 8, 0x80FFA000, 1);
 
         if (song == null)
         {
-            g.drawCenteredString(this.font, Component.literal("当前没有播放"), cx, cardY + 22, 0xFFAAAAAA);
+            g.drawCenteredString(this.font, Component.literal("当前没有播放"), cx, cardY + cardH / 2 - 4, 0xFFAAAAAA);
+            g.drawCenteredString(this.font, Component.literal("按 F7 浏览歌单 或 F10 搜索"), cx, cardY + cardH / 2 + 10, 0xFF888888);
             super.render(g, mouseX, mouseY, partialTick);
             return;
         }
 
-        // 歌曲名 + 状态
-        String songName = truncate(song.name, 35);
-        String statePrefix = p.isPaused() ? "⏸ " : (p.isPlaying() ? "▶ " : "■ ");
-        g.drawString(this.font, Component.literal(statePrefix + songName), textX, textY, 0xFFFFFFFF, false);
+        // 左侧唱片机图标
+        drawRecordPlayer(g, cardX + 10, cardY + (cardH - recordSize) / 2, recordSize, p.isPlaying(), partialTick);
 
-        // 艺术家（右上角）
+        // 右侧信息
+        int textX = cardX + 10 + recordSize + 12;
+        int textY = cardY + 10;
+        int textW = cardW - (textX - cardX) - 14;
+
+        // 歌曲名（带状态前缀，白色）
+        String statePrefix = p.isPaused() ? "⏸ " : (p.isPlaying() ? "▶ " : "■ ");
+        String songName = truncate(song.name, 38);
+        g.drawString(this.font, Component.literal(statePrefix + songName), textX, textY, COLOR_TEXT, false);
+
+        // 用户信息（右上角，青色）
         NeteaseUser u = NeteaseSession.getInstance().getCurrentUser();
         if (u != null)
         {
             String uInfo = "👤 " + truncate(u.nickname, 10);
             int uw = this.font.width(uInfo);
-            g.drawString(this.font, Component.literal(uInfo), cardX + cardW - uw - 14, textY, accent, false);
+            g.drawString(this.font, Component.literal(uInfo), cardX + cardW - uw - 14, textY, COLOR_ACCENT, false);
         }
 
-        // 艺术家 + 专辑（小字）
+        // 艺术家 + 专辑（灰色小字）
         textY += 12;
         String meta = song.getDisplayArtist() + " · " + (song.album == null || song.album.isEmpty() ? "未知" : truncate(song.album, 18));
-        g.drawString(this.font, Component.literal(truncate(meta, 50)), textX, textY, 0xFFCCCCCC, false);
+        g.drawString(this.font, Component.literal(truncate(meta, 50)), textX, textY, COLOR_DIM, false);
 
         // 队列信息（右上）
         if (!p.getQueue().isEmpty())
@@ -132,24 +145,41 @@ public class PlayerScreen extends Screen
             g.drawString(this.font, Component.literal(qInfo), cardX + cardW - qw - 14, textY, 0xFF888888, false);
         }
 
-        // 进度条（底部）
-        textY += 14;
+        // 进度条（AllMusic 风格：左时间 + 长条 + 右时间 + 青色滑块）
+        textY += 16;
         double pos = p.getPositionSec();
         double total = song.duration > 0 ? song.duration / 1000.0 : 0;
         double progress = total > 0 ? Math.min(1, pos / total) : 0;
-        ModernUI.drawProgressBar(g, textX, textY, cardW - 28, 4, progress);
-        String timeStr = formatTime(pos) + " / " + formatTime(total);
-        g.drawString(this.font, Component.literal(timeStr), textX, textY + 6, 0xFF888888, false);
 
-        // === 大型歌词面板（当前歌词居中） ===
+        String curTime = formatTime(pos);
+        String totTime = formatTime(total);
+        int curW = this.font.width(curTime);
+        int totW = this.font.width(totTime);
+        int barX = textX + curW + 6;
+        int barAvailW = textW - curW - totW - 12;
+        int barY = textY + 4;
+
+        // 当前时间（青色）
+        g.drawString(this.font, Component.literal(curTime), textX, textY, COLOR_ACCENT, false);
+        // 进度条背景
+        g.fill(barX, barY, barX + barAvailW, barY + 2, 0xFF444444);
+        // 进度条填充（白色）
+        int fillW = (int) (barAvailW * progress);
+        if (fillW > 0)
+        {
+            g.fill(barX, barY, barX + fillW, barY + 2, COLOR_TEXT);
+        }
+        // 青色滑块
+        int sliderX = barX + fillW - 1;
+        g.fill(sliderX, barY - 2, sliderX + 4, barY + 4, COLOR_ACCENT);
+        // 总时间（灰色）
+        g.drawString(this.font, Component.literal(totTime), textX + textW - totW, textY, COLOR_DIM, false);
+
+        // === 大型歌词面板（当前歌词居中，AllMusic 双行对照风格） ===
         int lyricY = cardY + cardH + 16;
         int lyricH = this.height - 36 - lyricY - 8;
         if (lyricH < 100) lyricH = 100;
         int lyricW = Math.min(700, this.width - 60);
-        int lyricX = cx - lyricW / 2;
-
-        // 不画背景卡片（半透明显示，让歌词更醒目）
-        // ModernUI.drawCard(g, lyricX, lyricY, lyricW, lyricH, 0.35, false);
 
         List<LyricLine> lyrics = p.getCurrentLyrics();
         if (lyrics == null || lyrics.isEmpty())
@@ -163,18 +193,14 @@ public class PlayerScreen extends Screen
             if (curIdx < 0)
             {
                 g.drawCenteredString(this.font, Component.literal("♪ ~ ~ ~"),
-                        cx, lyricY + lyricH / 2 - 4, 0xFF888888);
+                        cx, lyricY + lyricH / 2 - 4, COLOR_ACCENT);
             }
             else
             {
-                // 居中布局：当前行始终在面板正中
-                int lineH = 20;  // 大字体行高
+                int lineH = 22;
                 int centerY = lyricY + lyricH / 2;
                 int maxLines = Math.max(5, Math.min(11, lyricH / lineH));
                 int half = maxLines / 2;
-
-                int activeColor = ZephyrConfig.LYRIC_ACTIVE_COLOR.get();
-                int otherColor = ZephyrConfig.LYRIC_OTHER_COLOR.get();
 
                 for (int offset = -half; offset <= half; offset++)
                 {
@@ -185,7 +211,6 @@ public class PlayerScreen extends Screen
                     boolean isActive = (offset == 0);
                     int lineY = centerY + offset * lineH - lineH / 2;
 
-                    // 离中心越远越淡
                     int alpha;
                     if (isActive)
                     {
@@ -198,7 +223,7 @@ public class PlayerScreen extends Screen
                         if (alpha < 40) alpha = 40;
                     }
 
-                    int color = isActive ? activeColor : ModernUI.withAlpha(otherColor, alpha);
+                    int color = isActive ? COLOR_ACCENT : ModernUI.withAlpha(COLOR_LYRIC_NEXT, alpha);
 
                     if (isActive && line.isYrc && ZephyrConfig.LYRIC_KARAOKE.get())
                     {
@@ -215,6 +240,89 @@ public class PlayerScreen extends Screen
         }
 
         super.render(g, mouseX, mouseY, partialTick);
+    }
+
+    /** 绘制唱片机图标（像素风格，AllMusic 风格） */
+    private void drawRecordPlayer(GuiGraphics g, int x, int y, int size, boolean isPlaying, float partialTick)
+    {
+        int COLOR_RECORD = 0xFF5D4037;
+        int COLOR_ACCENT = 0xFF00FFFF;
+
+        // 底座
+        ModernUI.fillRound(g, x, y, size, size, 4, COLOR_RECORD);
+        g.fill(x, y, x + size, y + 1, 0xFF8D6E63);
+        g.fill(x, y + size - 1, x + size, y + size, 0xFF3E2723);
+
+        // 唱片
+        int discSize = size - 8;
+        int discX = x + 4;
+        int discY = y + 4;
+        fillCircle(g, discX + discSize / 2, discY + discSize / 2, discSize / 2, 0xFF1A1A1A);
+
+        int cx = discX + discSize / 2;
+        int cy = discY + discSize / 2;
+        for (int r = discSize / 2 - 2; r > 4; r -= 3)
+        {
+            drawCircleRing(g, cx, cy, r, 0xFF333333);
+        }
+
+        // 中央标签
+        int labelR = discSize / 4;
+        int labelColor = isPlaying ? COLOR_ACCENT : 0xFFFF6B35;
+        fillCircle(g, cx, cy, labelR, labelColor);
+        fillCircle(g, cx, cy, 2, 0xFFFFFFFF);
+
+        // 旋转指示线
+        if (isPlaying)
+        {
+            float angle = (System.currentTimeMillis() / 50f + partialTick * 10) % 360;
+            double rad = Math.toRadians(angle);
+            int lineLen = labelR - 2;
+            int ex = cx + (int) (Math.cos(rad) * lineLen);
+            int ey = cy + (int) (Math.sin(rad) * lineLen);
+            drawLine(g, cx, cy, ex, ey, COLOR_ACCENT);
+        }
+
+        // 底部按钮
+        int btnY = y + size - 6;
+        fillCircle(g, x + 8, btnY, 3, 0xFF888888);
+        fillCircle(g, x + 14, btnY, 3, isPlaying ? 0xFFFF5555 : 0xFF444444);
+    }
+
+    private void fillCircle(GuiGraphics g, int cx, int cy, int r, int color)
+    {
+        if (r <= 0) return;
+        for (int dy = -r; dy <= r; dy++)
+        {
+            int dx = (int) Math.round(Math.sqrt(r * r - dy * dy));
+            g.fill(cx - dx, cy + dy, cx + dx + 1, cy + dy + 1, color);
+        }
+    }
+
+    private void drawCircleRing(GuiGraphics g, int cx, int cy, int r, int color)
+    {
+        if (r <= 0) return;
+        for (int dy = -r; dy <= r; dy++)
+        {
+            int dx = (int) Math.round(Math.sqrt(r * r - dy * dy));
+            if (dy == -r || dy == r || dx == r)
+            {
+                g.fill(cx - dx, cy + dy, cx - dx + 1, cy + dy + 1, color);
+                g.fill(cx + dx, cy + dy, cx + dx + 1, cy + dy + 1, color);
+            }
+        }
+    }
+
+    private void drawLine(GuiGraphics g, int x1, int y1, int x2, int y2, int color)
+    {
+        int steps = Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1));
+        if (steps == 0) return;
+        for (int i = 0; i <= steps; i++)
+        {
+            int x = x1 + (x2 - x1) * i / steps;
+            int y = y1 + (y2 - y1) * i / steps;
+            g.fill(x, y, x + 1, y + 1, color);
+        }
     }
 
     private void renderKaraokeLineCentered(GuiGraphics g, LyricLine line, int cx, int y, int maxW, double pos)
