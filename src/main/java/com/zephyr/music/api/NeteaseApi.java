@@ -273,7 +273,8 @@ public class NeteaseApi
     // ============== 解析工具 ==============
 
     /**
-     * 从 loginStatus 响应中提取用户信息
+     * 从 loginStatus / user/account 响应中提取用户信息
+     * profile 可能为 null（api-enhanced 已知问题），此时从 account 提取 userId
      */
     public static NeteaseUser parseUser(JsonObject loginStatusResp)
     {
@@ -281,22 +282,113 @@ public class NeteaseApi
         {
             JsonObject data = loginStatusResp.has("data") && loginStatusResp.get("data").isJsonObject()
                     ? loginStatusResp.getAsJsonObject("data") : loginStatusResp;
-            JsonObject profile = data.has("profile") && data.get("profile").isJsonObject()
-                    ? data.getAsJsonObject("profile") : null;
-            if (profile == null || profile.isJsonNull()) return null;
+
+            JsonObject profile = null;
+            if (data.has("profile") && !data.get("profile").isJsonNull() && data.get("profile").isJsonObject())
+                profile = data.getAsJsonObject("profile");
+
+            JsonObject account = null;
+            if (data.has("account") && !data.get("account").isJsonNull() && data.get("account").isJsonObject())
+                account = data.getAsJsonObject("account");
+
+            // profile 为 null 时从 account 提取
+            if (profile == null && account != null)
+            {
+                ZephyrMusic.LOGGER.info("[Zephyr] parseUser: profile is null, extracting from account");
+                NeteaseUser u = new NeteaseUser();
+                u.userId = account.has("id") ? account.get("id").getAsLong() : 0;
+                u.nickname = account.has("userName") && !account.get("userName").isJsonNull()
+                        ? account.get("userName").getAsString() : "网易云用户";
+                if (account.has("vipType") && !account.get("vipType").isJsonNull())
+                    u.vipType = account.get("vipType").getAsInt();
+                if (account.has("createTime") && !account.get("createTime").isJsonNull())
+                    u.createTime = account.get("createTime").getAsLong();
+                return u;
+            }
+
+            if (profile == null) return null;
+
             NeteaseUser u = new NeteaseUser();
             u.userId = profile.has("userId") ? profile.get("userId").getAsLong() : 0;
-            u.nickname = profile.has("nickname") ? profile.get("nickname").getAsString() : "网易云用户";
+            if (u.userId == 0 && account != null && account.has("id"))
+                u.userId = account.get("id").getAsLong();
+            u.nickname = profile.has("nickname") && !profile.get("nickname").isJsonNull()
+                    ? profile.get("nickname").getAsString() : "网易云用户";
             u.avatarUrl = profile.has("avatarUrl") && !profile.get("avatarUrl").isJsonNull()
                     ? profile.get("avatarUrl").getAsString() : "";
             u.signature = profile.has("signature") && !profile.get("signature").isJsonNull()
                     ? profile.get("signature").getAsString() : "";
+            u.createTime = profile.has("createTime") && !profile.get("createTime").isJsonNull()
+                    ? profile.get("createTime").getAsLong() : 0;
+            u.gender = profile.has("gender") && !profile.get("gender").isJsonNull()
+                    ? profile.get("gender").getAsInt() : 0;
+            u.city = profile.has("city") && !profile.get("city").isJsonNull()
+                    ? profile.get("city").getAsInt() : 0;
+            u.province = profile.has("province") && !profile.get("province").isJsonNull()
+                    ? profile.get("province").getAsInt() : 0;
+            if (account != null && account.has("vipType") && !account.get("vipType").isJsonNull())
+                u.vipType = account.get("vipType").getAsInt();
+            u.backgroundUrl = profile.has("backgroundUrl") && !profile.get("backgroundUrl").isJsonNull()
+                    ? profile.get("backgroundUrl").getAsString() : "";
             return u;
         }
         catch (Exception e)
         {
             ZephyrMusic.LOGGER.warn("[Zephyr] parseUser failed: {}", e.getMessage());
             return null;
+        }
+    }
+
+    /** 用户详情 (/user/detail) */
+    public CompletableFuture<JsonObject> userDetail(long uid)
+    {
+        Map<String, String> p = new HashMap<>();
+        p.put("uid", String.valueOf(uid));
+        return http.get("/user/detail", p);
+    }
+
+    /** 从 userDetail 响应中提取详细用户信息 */
+    public static NeteaseUser parseUserDetail(JsonObject resp, NeteaseUser baseUser)
+    {
+        try
+        {
+            JsonObject profile = null;
+            if (resp.has("profile") && resp.get("profile").isJsonObject())
+                profile = resp.getAsJsonObject("profile");
+            else if (resp.has("data") && resp.getAsJsonObject("data").has("profile"))
+                profile = resp.getAsJsonObject("data").getAsJsonObject("profile");
+            NeteaseUser u = baseUser != null ? baseUser : new NeteaseUser();
+            if (profile != null)
+            {
+                if (profile.has("listenSongs") && !profile.get("listenSongs").isJsonNull())
+                    u.listenSongs = profile.get("listenSongs").getAsLong();
+                if (profile.has("createTime") && !profile.get("createTime").isJsonNull())
+                    u.createTime = profile.get("createTime").getAsLong();
+                if (profile.has("gender") && !profile.get("gender").isJsonNull())
+                    u.gender = profile.get("gender").getAsInt();
+                if (profile.has("city") && !profile.get("city").isJsonNull())
+                    u.city = profile.get("city").getAsInt();
+                if (profile.has("province") && !profile.get("province").isJsonNull())
+                    u.province = profile.get("province").getAsInt();
+                if (profile.has("avatarUrl") && !profile.get("avatarUrl").isJsonNull())
+                    u.avatarUrl = profile.get("avatarUrl").getAsString();
+                if (profile.has("nickname") && !profile.get("nickname").isJsonNull())
+                    u.nickname = profile.get("nickname").getAsString();
+                if (profile.has("signature") && !profile.get("signature").isJsonNull())
+                    u.signature = profile.get("signature").getAsString();
+            }
+            if (resp.has("level") && !resp.get("level").isJsonNull())
+                u.level = resp.get("level").getAsInt();
+            if (resp.has("vipType") && !resp.get("vipType").isJsonNull())
+                u.vipType = resp.get("vipType").getAsInt();
+            if (resp.has("listenSongs") && !resp.get("listenSongs").isJsonNull())
+                u.listenSongs = resp.get("listenSongs").getAsLong();
+            return u;
+        }
+        catch (Exception e)
+        {
+            ZephyrMusic.LOGGER.warn("[Zephyr] parseUserDetail failed: {}", e.getMessage());
+            return baseUser;
         }
     }
 

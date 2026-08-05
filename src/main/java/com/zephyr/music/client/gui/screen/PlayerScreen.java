@@ -69,9 +69,18 @@ public class PlayerScreen extends Screen
         addRenderableWidget(Button.builder(Component.literal("设置"), b -> minecraft.setScreen(new SettingsScreen()))
                 .bounds(92, navY, 40, 16).build());
 
-        String acctText = NeteaseSession.getInstance().isLoggedIn() ? "账号" : "登录";
-        addRenderableWidget(Button.builder(Component.literal(acctText), b -> minecraft.setScreen(new LoginScreen()))
-                .bounds(this.width - 130, navY, 40, 16).build());
+        // ★ 登录后显示完整用户名，按钮宽度自适应
+        NeteaseUser curUser = NeteaseSession.getInstance().getCurrentUser();
+        String acctText = (curUser != null && curUser.nickname != null && !curUser.nickname.isEmpty())
+                ? curUser.nickname : "登录";
+        int acctBtnW = Math.max(40, this.font.width(acctText) + 12);
+        addRenderableWidget(Button.builder(Component.literal(acctText), b -> {
+                    if (NeteaseSession.getInstance().isLoggedIn())
+                        minecraft.setScreen(new AccountScreen());
+                    else
+                        minecraft.setScreen(new LoginScreen());
+                })
+                .bounds(this.width - acctBtnW - 22, navY, acctBtnW, 16).build());
         addRenderableWidget(Button.builder(Component.literal("✕"), b -> onClose())
                 .bounds(this.width - 22, navY, 14, 16).build());
     }

@@ -44,6 +44,12 @@ public class NeteaseSession
         return currentUser;
     }
 
+    /** 更新当前用户信息 */
+    public void updateCurrentUser(NeteaseUser user)
+    {
+        if (user != null) this.currentUser = user;
+    }
+
     public List<NeteasePlaylist> getCachedPlaylists()
     {
         return cachedPlaylists;
@@ -60,17 +66,16 @@ public class NeteaseSession
             currentUser = null;
             return CompletableFuture.completedFuture(false);
         }
-        return api.loginStatus().thenApply(resp -> {
+        // ★ 先尝试 /login/status，如果 profile 为 null 再试 /user/account
+        return api.loginStatus().thenCompose(resp -> {
             try
             {
-                // 调试：记录 loginStatus 响应的关键字段
                 ZephyrMusic.LOGGER.info("[Zephyr] loginStatus response keys: {}", resp.keySet());
                 if (resp.has("data") && resp.get("data").isJsonObject())
                 {
                     JsonObject d = resp.getAsJsonObject("data");
                     ZephyrMusic.LOGGER.info("[Zephyr] loginStatus.data keys: {}, data.code={}",
-                            d.keySet(),
-                            d.has("code") ? d.get("code").getAsInt() : "N/A");
+                            d.keySet(), d.has("code") ? d.get("code").getAsInt() : "N/A");
                 }
 
                 NeteaseUser u = NeteaseApi.parseUser(resp);
@@ -79,17 +84,47 @@ public class NeteaseSession
                     currentUser = u;
                     loggedIn = true;
                     ZephyrMusic.LOGGER.info("[Zephyr] Logged in as {} ({})", u.nickname, u.userId);
-                    return true;
+                    // 如果昵称是 token 格式，获取真实昵称
+                    if (u.nickname != null && u.nickname.contains("_") && u.nickname.length() > 20)
+                    {
+                        api.userDetail(u.userId).thenAccept(detail -> {
+                            NeteaseUser detailed = NeteaseApi.parseUserDetail(detail, u);
+                            if (detailed != null && detailed.nickname != null && !detailed.nickname.contains("_"))
+                            { currentUser = detailed; ZephyrMusic.LOGGER.info("[Zephyr] Updated nickname: {}", detailed.nickname); }
+                        });
+                    }
+                    return CompletableFuture.completedFuture(true);
                 }
-                ZephyrMusic.LOGGER.warn("[Zephyr] checkLoginStatus: no valid profile in response");
-                loggedIn = false;
-                return false;
+
+                // profile 为 null 时尝试 /user/account
+                ZephyrMusic.LOGGER.info("[Zephyr] loginStatus profile null, trying /user/account...");
+                return api.userAccount().thenApply(acctResp -> {
+                    NeteaseUser u2 = NeteaseApi.parseUser(acctResp);
+                    if (u2 != null && u2.userId != 0)
+                    {
+                        currentUser = u2;
+                        loggedIn = true;
+                        ZephyrMusic.LOGGER.info("[Zephyr] Logged in via /user/account as {} ({})", u2.nickname, u2.userId);
+                        if (u2.nickname != null && u2.nickname.contains("_") && u2.nickname.length() > 20)
+                        {
+                            api.userDetail(u2.userId).thenAccept(detail -> {
+                                NeteaseUser detailed = NeteaseApi.parseUserDetail(detail, u2);
+                                if (detailed != null && detailed.nickname != null && !detailed.nickname.contains("_"))
+                                { currentUser = detailed; ZephyrMusic.LOGGER.info("[Zephyr] Updated nickname: {}", detailed.nickname); }
+                            });
+                        }
+                        return true;
+                    }
+                    ZephyrMusic.LOGGER.warn("[Zephyr] checkLoginStatus: no valid profile");
+                    loggedIn = false;
+                    return false;
+                });
             }
             catch (Exception e)
             {
                 ZephyrMusic.LOGGER.error("[Zephyr] checkLoginStatus failed", e);
                 loggedIn = false;
-                return false;
+                return CompletableFuture.completedFuture(false);
             }
         });
     }

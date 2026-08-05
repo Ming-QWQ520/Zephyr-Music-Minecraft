@@ -33,7 +33,7 @@ public class PlaylistBrowserScreen extends Screen
 
     private PlaylistList playlistListWidget;
     private SongList songListWidget;
-    private boolean initedOnce = false;
+    private boolean loadingTriggered = false;  // ★ 修复：用独立标志替代 initedOnce
 
     public PlaylistBrowserScreen()
     {
@@ -43,7 +43,6 @@ public class PlaylistBrowserScreen extends Screen
     @Override
     protected void init()
     {
-        initedOnce = true;
         // 顶部按钮（紧凑）
         addRenderableWidget(Button.builder(Component.literal("✕"), b -> onClose())
                 .bounds(this.width - 22, 6, 14, 16).build());
@@ -86,8 +85,9 @@ public class PlaylistBrowserScreen extends Screen
         }
 
         // 启动时的加载逻辑
-        if (state == ViewState.LOADING && !initedOnce)
+        if (state == ViewState.LOADING && !loadingTriggered)
         {
+            loadingTriggered = true;
             // 触发登录态检查
             if (!NeteaseSession.getInstance().isLoggedIn())
             {

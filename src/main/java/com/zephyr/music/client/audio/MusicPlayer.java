@@ -671,6 +671,51 @@ public class MusicPlayer
         playSong(queue.get(prev));
     }
 
+    /** 跳转到队列中指定索引的歌曲 */
+    public void jumpTo(int index)
+    {
+        if (queue.isEmpty() || index < 0 || index >= queue.size()) return;
+        queueIndex = index;
+        playSong(queue.get(index));
+    }
+
+    /** 从队列中移除指定索引的歌曲 */
+    public void removeFromQueue(int index)
+    {
+        if (queue.isEmpty() || index < 0 || index >= queue.size()) return;
+        boolean isCurrent = (index == queueIndex);
+        java.util.List<NeteaseSong> newQueue = new java.util.ArrayList<>(queue);
+        newQueue.remove(index);
+        queue.clear();
+        queue.addAll(newQueue);
+        if (queue.isEmpty()) { queueIndex = -1; stop(); return; }
+        if (isCurrent) { int newIdx = Math.min(index, queue.size() - 1); queueIndex = newIdx; playSong(queue.get(newIdx)); }
+        else if (index < queueIndex) { queueIndex--; }
+    }
+
+    /** 清空队列 */
+    public void clearQueue() { queue.clear(); queueIndex = -1; stop(); }
+
+    /** 添加到当前播放歌曲的下一首 */
+    public void playNext(NeteaseSong song)
+    {
+        if (song == null) return;
+        for (NeteaseSong q : queue) { if (q.id == song.id) return; }
+        if (queue.isEmpty() || queueIndex < 0) { queue.add(song); queueIndex = 0; playSong(song); return; }
+        int insertPos = queueIndex + 1;
+        if (insertPos > queue.size()) insertPos = queue.size();
+        queue.add(insertPos, song);
+    }
+
+    /** 追加到队列尾部 */
+    public void appendToQueue(NeteaseSong song)
+    {
+        if (song == null) return;
+        for (NeteaseSong q : queue) { if (q.id == song.id) return; }
+        queue.add(song);
+        if (queueIndex < 0 || !playing.get()) { queueIndex = queue.size() - 1; playSong(song); }
+    }
+
     public void shutdown()
     {
         stopInternal(false);
