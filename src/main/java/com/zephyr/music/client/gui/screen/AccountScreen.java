@@ -75,7 +75,8 @@ public class AccountScreen extends Screen
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick)
     {
-        renderBackground(g);
+        // 不绘制默认泥土背景
+        // renderBackground(g);
         int cx = this.width / 2;
         final int COLOR_ACCENT = 0xFF00FFFF;
         final int COLOR_TEXT = 0xFFFFFFFF;

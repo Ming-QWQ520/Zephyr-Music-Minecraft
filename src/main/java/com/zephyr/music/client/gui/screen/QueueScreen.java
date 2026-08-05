@@ -52,7 +52,8 @@ public class QueueScreen extends Screen
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick)
     {
-        renderBackground(g);
+        // 不绘制默认泥土背景
+        // renderBackground(g);
         int cx = this.width / 2;
         MusicPlayer mp = MusicPlayer.getInstance();
         List<NeteaseSong> queue = mp.getQueue();
@@ -103,6 +104,13 @@ public class QueueScreen extends Screen
 
     class QueueList extends ObjectSelectionList<QueueList.Entry>
     {
+        
+        @Override
+        public int getRowWidth()
+        {
+            return this.width - 8;
+        }
+
         public QueueList(Minecraft mc, int width, int height, int y0, int y1, int itemHeight)
         {
             super(mc, width, height, y0, y1, itemHeight);

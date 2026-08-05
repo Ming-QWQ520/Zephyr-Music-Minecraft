@@ -500,7 +500,8 @@ public class LoginScreen extends Screen
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick)
     {
-        renderBackground(g);
+        // 不绘制默认泥土背景
+        // renderBackground(g);
 
         int cx = this.width / 2;
         int topY = Math.max(30, (this.height - 320) / 2);

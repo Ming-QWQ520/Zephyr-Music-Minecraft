@@ -33,6 +33,9 @@ public class PlayerScreen extends Screen
     /** 音量条区域（用于鼠标拖动检测） */
     private int volBarX, volBarY, volBarW, volBarH;
     private boolean volDragging = false;
+    /** ★ 进度条区域（用于鼠标拖动检测） */
+    private int progBarX, progBarY, progBarW, progBarH;
+    private boolean progDragging = false;
 
     @Override
     protected void init()
@@ -98,7 +101,8 @@ public class PlayerScreen extends Screen
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick)
     {
-        renderBackground(g);
+        // 不绘制默认泥土背景
+        // renderBackground(g);
         int cx = this.width / 2;
 
         MusicPlayer p = MusicPlayer.getInstance();
@@ -189,19 +193,20 @@ public class PlayerScreen extends Screen
         int barAvailW = textW - curW - totW - 12;
         int barY = textY + 4;
 
+        // ★ 保存进度条位置用于鼠标拖动
+        progBarX = barX;
+        progBarY = barY;
+        progBarW = barAvailW;
+        progBarH = 6;
+
         // 当前时间（青色）
         g.drawString(this.font, Component.literal(curTime), textX, textY, COLOR_ACCENT, false);
-        // 进度条背景
-        g.fill(barX, barY, barX + barAvailW, barY + 2, 0xFF444444);
-        // 进度条填充（白色）
-        int fillW = (int) (barAvailW * progress);
-        if (fillW > 0)
-        {
-            g.fill(barX, barY, barX + fillW, barY + 2, COLOR_TEXT);
-        }
+        // ★ 进度条用 ModernUI.drawProgressBar（圆角，可点击）
+        ModernUI.drawProgressBar(g, barX, barY, barAvailW, 4, progress);
         // 青色滑块
+        int fillW = (int) (barAvailW * progress);
         int sliderX = barX + fillW - 1;
-        g.fill(sliderX, barY - 2, sliderX + 4, barY + 4, COLOR_ACCENT);
+        g.fill(sliderX, barY - 2, sliderX + 4, barY + 6, COLOR_ACCENT);
         // 总时间（灰色）
         g.drawString(this.font, Component.literal(totTime), textX + textW - totW, textY, COLOR_DIM, false);
 
@@ -283,11 +288,19 @@ public class PlayerScreen extends Screen
         super.render(g, mouseX, mouseY, partialTick);
     }
 
-    /** ★ 鼠标点击音量条 */
+    /** ★ 鼠标点击音量条 / 进度条 */
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button)
     {
-        // 检查是否点击了音量条
+        // 检查进度条
+        if (mouseX >= progBarX - 4 && mouseX <= progBarX + progBarW + 4
+                && mouseY >= progBarY - 4 && mouseY <= progBarY + progBarH + 4)
+        {
+            progDragging = true;
+            seekFromMouse(mouseX);
+            return true;
+        }
+        // 检查音量条
         if (mouseX >= volBarX - 16 && mouseX <= volBarX + volBarW + 20
                 && mouseY >= volBarY - 4 && mouseY <= volBarY + volBarH + 4)
         {
@@ -298,15 +311,12 @@ public class PlayerScreen extends Screen
         return super.mouseClicked(mouseX, mouseY, button);
     }
 
-    /** ★ 鼠标拖动音量条 */
+    /** ★ 鼠标拖动 */
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY)
     {
-        if (volDragging)
-        {
-            updateVolumeFromMouse(mouseX);
-            return true;
-        }
+        if (progDragging) { seekFromMouse(mouseX); return true; }
+        if (volDragging) { updateVolumeFromMouse(mouseX); return true; }
         return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
     }
 
@@ -314,11 +324,8 @@ public class PlayerScreen extends Screen
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button)
     {
-        if (volDragging)
-        {
-            volDragging = false;
-            return true;
-        }
+        if (progDragging) { progDragging = false; return true; }
+        if (volDragging) { volDragging = false; return true; }
         return super.mouseReleased(mouseX, mouseY, button);
     }
 
@@ -326,7 +333,6 @@ public class PlayerScreen extends Screen
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta)
     {
-        // 在音量条附近滚轮调节
         if (mouseX >= volBarX - 20 && mouseX <= volBarX + volBarW + 20)
         {
             float vol = MusicPlayer.getInstance().getVolume();
@@ -342,6 +348,18 @@ public class PlayerScreen extends Screen
         double rel = (mouseX - volBarX) / volBarW;
         rel = Math.max(0, Math.min(1, rel));
         MusicPlayer.getInstance().setVolume((float) rel);
+    }
+
+    /** ★ 从鼠标位置 seek 播放进度 */
+    private void seekFromMouse(double mouseX)
+    {
+        MusicPlayer p = MusicPlayer.getInstance();
+        NeteaseSong song = p.getCurrentSong();
+        if (song == null || song.duration <= 0) return;
+        double rel = (mouseX - progBarX) / progBarW;
+        rel = Math.max(0, Math.min(1, rel));
+        double targetSec = rel * (song.duration / 1000.0);
+        p.seekTo(targetSec);
     }
 
     /** 渲染封面图（PlayerScreen 用大图） */

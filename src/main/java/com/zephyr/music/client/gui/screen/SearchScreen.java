@@ -175,7 +175,8 @@ public class SearchScreen extends Screen
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick)
     {
-        renderBackground(g);
+        // 不绘制默认泥土背景
+        // renderBackground(g);
         int cx = this.width / 2;
         g.drawCenteredString(this.font, this.getTitle(), cx, 8, 0xFFFFFFFF);
         g.drawCenteredString(this.font, Component.literal(statusMessage), cx, 52, statusColor);
@@ -200,6 +201,13 @@ public class SearchScreen extends Screen
     /** 搜索结果列表项 */
     class SearchList extends ObjectSelectionList<SearchList.Entry>
     {
+        
+        @Override
+        public int getRowWidth()
+        {
+            return this.width - 8;
+        }
+
         public SearchList(Minecraft mc, int width, int height, int y0, int y1, int itemHeight)
         {
             super(mc, width, height, y0, y1, itemHeight);

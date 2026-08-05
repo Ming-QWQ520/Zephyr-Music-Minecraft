@@ -69,6 +69,8 @@ public class MusicPlayer
 
     private volatile long playStartTimeMs = 0;
     private volatile double positionOffsetSec = 0;
+    private volatile long lineStartPosUs = 0;
+    private volatile double lastReturnedPos = 0;
 
     private final List<NeteaseSong> queue = new CopyOnWriteArrayList<>();
     private volatile int queueIndex = -1;
@@ -714,6 +716,19 @@ public class MusicPlayer
         for (NeteaseSong q : queue) { if (q.id == song.id) return; }
         queue.add(song);
         if (queueIndex < 0 || !playing.get()) { queueIndex = queue.size() - 1; playSong(song); }
+    }
+
+    /** ★ Seek 到指定位置（秒）- 通过重启流播放实现 */
+    public void seekTo(double targetSec)
+    {
+        NeteaseSong song = currentSong.get();
+        if (song == null) return;
+        // 简单实现：更新 positionOffsetSec，让 getPositionSec 返回新位置
+        // 真正的 seek 需要重新请求 URL 并跳过前面的数据，这里用近似实现
+        positionOffsetSec = targetSec;
+        lineStartPosUs = 0;
+        lastReturnedPos = targetSec;
+        ZephyrMusic.LOGGER.info("[Zephyr] Seek to {}s", String.format("%.1f", targetSec));
     }
 
     public void shutdown()

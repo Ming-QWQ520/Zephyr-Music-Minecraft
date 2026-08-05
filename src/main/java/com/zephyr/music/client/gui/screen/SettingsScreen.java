@@ -41,7 +41,8 @@ public class SettingsScreen extends Screen
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick)
     {
-        renderBackground(g);
+        // 不绘制默认泥土背景
+        // renderBackground(g);
         int cx = this.width / 2;
         g.drawCenteredString(this.font, this.getTitle(), cx, 14, 0xFFFFFFFF);
         g.drawString(this.font, Component.literal("修改后即时生效，配置自动保存"), 14, 40, 0xFF888888, false);
@@ -56,6 +57,13 @@ public class SettingsScreen extends Screen
 
     private class SettingsList extends ObjectSelectionList<SettingsList.Entry>
     {
+        
+        @Override
+        public int getRowWidth()
+        {
+            return this.width - 8;
+        }
+
         public SettingsList()
         {
             super(SettingsScreen.this.minecraft, SettingsScreen.this.width - 40,
