@@ -30,6 +30,10 @@ public class PlayerScreen extends Screen
         super(Component.literal("Zephyr Music"));
     }
 
+    /** 音量条区域（用于鼠标拖动检测） */
+    private int volBarX, volBarY, volBarW, volBarH;
+    private boolean volDragging = false;
+
     @Override
     protected void init()
     {
@@ -37,27 +41,33 @@ public class PlayerScreen extends Screen
         int cx = this.width / 2;
         int bottomBarY = this.height - 36;
 
-        // 底部播放控制条（更紧凑）
-        addRenderableWidget(Button.builder(Component.literal("🔉"), b -> p.setVolume(p.getVolume() - 0.1f))
-                .bounds(cx - 180, bottomBarY, 26, 18).build());
+        // 底部播放控制条
+        // 上一首
         addRenderableWidget(Button.builder(Component.literal("⏮"), b -> p.prev())
-                .bounds(cx - 145, bottomBarY, 36, 18).build());
+                .bounds(cx - 140, bottomBarY, 36, 18).build());
+        // 播放/暂停
         String playBtn = p.isPaused() ? "▶" : (p.isPlaying() ? "⏸" : "▶");
         addRenderableWidget(Button.builder(Component.literal(playBtn), b -> {
                     if (p.isPlaying()) {
                         if (p.isPaused()) p.resume(); else p.pause();
                     }
                 })
-                .bounds(cx - 100, bottomBarY, 50, 18).build());
+                .bounds(cx - 95, bottomBarY, 50, 18).build());
+        // 下一首
         addRenderableWidget(Button.builder(Component.literal("⏭"), b -> p.next())
-                .bounds(cx + 20, bottomBarY, 36, 18).build());
+                .bounds(cx + 25, bottomBarY, 36, 18).build());
+        // 循环
         addRenderableWidget(Button.builder(Component.literal(p.isLoopMode() ? "🔁" : "➡"), b -> {
                     p.setLoopMode(!p.isLoopMode());
                     b.setMessage(Component.literal(p.isLoopMode() ? "🔁" : "➡"));
                 })
-                .bounds(cx + 65, bottomBarY, 36, 18).build());
-        addRenderableWidget(Button.builder(Component.literal("🔊"), b -> p.setVolume(p.getVolume() + 0.1f))
-                .bounds(cx + 110, bottomBarY, 26, 18).build());
+                .bounds(cx + 70, bottomBarY, 36, 18).build());
+
+        // ★ 音量条（可拖动）位置
+        volBarX = cx + 120;
+        volBarY = bottomBarY + 6;
+        volBarW = 80;
+        volBarH = 6;
 
         // 顶部紧凑导航栏
         int topY = 6;
@@ -259,7 +269,79 @@ public class PlayerScreen extends Screen
             }
         }
 
+        // ★ 绘制音量条（在 super.render 之前，这样按钮会覆盖在上面）
+        float vol = MusicPlayer.getInstance().getVolume();
+        // 音量图标
+        String volIcon = vol <= 0 ? "🔇" : (vol < 0.5 ? "🔉" : "🔊");
+        g.drawString(this.font, Component.literal(volIcon), volBarX - 16, volBarY - 4, 0xFFCCCCCC, false);
+        // 音量条背景
+        ModernUI.drawProgressBar(g, volBarX, volBarY, volBarW, volBarH, vol);
+        // 音量百分比
+        String volText = (int)(vol * 100) + "%";
+        g.drawString(this.font, Component.literal(volText), volBarX + volBarW + 4, volBarY - 4, 0xFFAAAAAA, false);
+
         super.render(g, mouseX, mouseY, partialTick);
+    }
+
+    /** ★ 鼠标点击音量条 */
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button)
+    {
+        // 检查是否点击了音量条
+        if (mouseX >= volBarX - 16 && mouseX <= volBarX + volBarW + 20
+                && mouseY >= volBarY - 4 && mouseY <= volBarY + volBarH + 4)
+        {
+            volDragging = true;
+            updateVolumeFromMouse(mouseX);
+            return true;
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    /** ★ 鼠标拖动音量条 */
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY)
+    {
+        if (volDragging)
+        {
+            updateVolumeFromMouse(mouseX);
+            return true;
+        }
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+    }
+
+    /** ★ 鼠标释放 */
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button)
+    {
+        if (volDragging)
+        {
+            volDragging = false;
+            return true;
+        }
+        return super.mouseReleased(mouseX, mouseY, button);
+    }
+
+    /** ★ 鼠标滚轮调节音量 */
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double delta)
+    {
+        // 在音量条附近滚轮调节
+        if (mouseX >= volBarX - 20 && mouseX <= volBarX + volBarW + 20)
+        {
+            float vol = MusicPlayer.getInstance().getVolume();
+            vol += (delta > 0 ? 0.05f : -0.05f);
+            MusicPlayer.getInstance().setVolume(vol);
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, delta);
+    }
+
+    private void updateVolumeFromMouse(double mouseX)
+    {
+        double rel = (mouseX - volBarX) / volBarW;
+        rel = Math.max(0, Math.min(1, rel));
+        MusicPlayer.getInstance().setVolume((float) rel);
     }
 
     /** 渲染封面图（PlayerScreen 用大图） */

@@ -330,7 +330,7 @@ public class LoginScreen extends Screen
                         // ★ 先立即取消 timer，防止再次轮询返回 800 误判失败
                         if (qrTimer != null) { qrTimer.cancel(); qrTimer = null; }
 
-                        statusMessage = "登录成功！正在同步状态…";
+                        statusMessage = "登录成功！正在跳转…";
                         statusColor = 0xFF1DB954;
                         String cookie = NeteaseApi.extractCookie(resp);
                         ZephyrMusic.LOGGER.info("[Zephyr] QR 803 received, cookie length: {}",
@@ -338,33 +338,12 @@ public class LoginScreen extends Screen
                         if (cookie != null && !cookie.isEmpty())
                         {
                             NeteaseHttpClient.getInstance().setCookie(cookie);
-                            ZephyrMusic.LOGGER.info("[Zephyr] Cookie saved via QR login, refreshing user...");
-                            // 自动刷新用户信息并跳转
-                            NeteaseSession.getInstance().refreshUser().thenAccept(ok -> {
-                                ZephyrMusic.LOGGER.info("[Zephyr] refreshUser result: {}", ok);
-                                if (ok)
-                                {
-                                    NeteaseUser u = NeteaseSession.getInstance().getCurrentUser();
-                                    if (u != null)
-                                    {
-                                        statusMessage = "欢迎, " + u.nickname;
-                                    }
-                                    // 跳转到歌单浏览器
-                                    Minecraft.getInstance().execute(() -> {
-                                        Minecraft.getInstance().setScreen(new PlaylistBrowserScreen());
-                                    });
-                                }
-                                else
-                                {
-                                    // refreshUser 失败但 cookie 已保存，仍然跳转
-                                    // 用户可以在歌单界面手动刷新
-                                    ZephyrMusic.LOGGER.warn("[Zephyr] refreshUser failed, but cookie is saved. Redirecting anyway.");
-                                    statusMessage = "已登录，正在加载歌单…";
-                                    statusColor = 0xFFFFFF55;
-                                    Minecraft.getInstance().execute(() -> {
-                                        Minecraft.getInstance().setScreen(new PlaylistBrowserScreen());
-                                    });
-                                }
+                            ZephyrMusic.LOGGER.info("[Zephyr] Cookie saved via QR login");
+                            // ★ 直接跳转，不等待 refreshUser（避免 profile=null 导致闪烁"登录失败"）
+                            // refreshUser 在后台异步执行，获取到真实昵称后自动更新
+                            NeteaseSession.getInstance().refreshUser();
+                            Minecraft.getInstance().execute(() -> {
+                                Minecraft.getInstance().setScreen(new PlaylistBrowserScreen());
                             });
                         }
                         else
