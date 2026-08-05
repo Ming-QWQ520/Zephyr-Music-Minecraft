@@ -179,6 +179,11 @@ public class SearchScreen extends Screen
         int cx = this.width / 2;
         g.drawCenteredString(this.font, this.getTitle(), cx, 8, 0xFFFFFFFF);
         g.drawCenteredString(this.font, Component.literal(statusMessage), cx, 52, statusColor);
+        // ★ 修复：addWidget() 的 widget 不会在 super.render() 中自动渲染，必须手动调用
+        if (resultList != null)
+        {
+            resultList.render(g, mouseX, mouseY, partialTick);
+        }
         super.render(g, mouseX, mouseY, partialTick);
         // 队列大小提示
         MusicPlayer mp = MusicPlayer.getInstance();
@@ -203,12 +208,6 @@ public class SearchScreen extends Screen
             {
                 addEntry(new Entry(results.get(i), i));
             }
-        }
-
-        @Override
-        public int getRowWidth()
-        {
-            return this.width - 12;
         }
 
         class Entry extends ObjectSelectionList.Entry<Entry>

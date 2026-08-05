@@ -109,9 +109,6 @@ public class SettingsScreen extends Screen
             addEntry(new ToggleEntry("听歌打卡", ZephyrConfig.SCROBBLE_ENABLED, Arrays.asList("OFF", "ON")));
         }
 
-        @Override
-        public int getRowWidth() { return this.width - 12; }
-
         abstract class Entry extends ObjectSelectionList.Entry<Entry>
         {
             abstract String label();

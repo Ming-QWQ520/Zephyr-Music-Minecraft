@@ -253,12 +253,6 @@ public class PlaylistBrowserScreen extends Screen
             }
         }
 
-        @Override
-        public int getRowWidth()
-        {
-            return this.width - 12;
-        }
-
         class Entry extends ObjectSelectionList.Entry<Entry>
         {
             final NeteasePlaylist playlist;
@@ -312,12 +306,6 @@ public class PlaylistBrowserScreen extends Screen
             {
                 addEntry(new Entry(songs.get(i), i));
             }
-        }
-
-        @Override
-        public int getRowWidth()
-        {
-            return this.width - 12;
         }
 
         class Entry extends ObjectSelectionList.Entry<Entry>
