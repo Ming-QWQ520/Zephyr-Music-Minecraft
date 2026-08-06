@@ -95,7 +95,8 @@ public class PlayerScreen extends Screen
             addRenderableWidget(Button.builder(Component.literal(label), b -> {
                         currentTab = tab;
                         rightScrollY = 0;
-                        onTabSwitch();
+                        clearWidgets();
+                        init();
                     })
                     .bounds(8 + i * (tabW + 2), tabY, tabW, tabH).build());
         }
@@ -121,6 +122,14 @@ public class PlayerScreen extends Screen
         volY = bottomY + 5;
         volW = 68;
         volH = 6;
+
+        // ★ 预计算进度条坐标（避免 mouseClicked 用到旧值）
+        int progLx = 8;
+        int progLw = LEFT_W;
+        progX = progLx + 10;
+        progW = progLw - 20;
+        progY = 22 + 10 + COVER_SIZE + 8 + 12 + 12 + 28 + 12;  // 封面+歌名+艺术家+进度条时间行+12
+        progH = 6;
 
         // 搜索框（SEARCH Tab 时显示）
         searchField = null;  // 先清空
@@ -228,9 +237,8 @@ public class PlayerScreen extends Screen
         NeteaseSong song = p.getCurrentSong();
         final int ACCENT = 0xFF00FFFF, TEXT = 0xFFFFFFFF, DIM = 0xFFAAAAAA, NEXT = 0xFFCCCCCC;
 
-        // === 左侧面板 ===
+        // === 左侧面板 ===（无背景）
         int lx = 8, ly = 22, lw = LEFT_W, lh = this.height - 56;
-        ModernUI.fillRound(g, lx, ly, lw, lh, 8, 0xC01a1a2e);
 
         // 封面
         int cx2 = lx + (lw - COVER_SIZE) / 2;
@@ -338,8 +346,23 @@ public class PlayerScreen extends Screen
                 renderKaraoke(g, line, x+w/2, ly2, w-40, pos);
             else
             {
-                String t = trunc(line.text, 55);
-                g.drawString(this.font, Component.literal(t), x+w/2 - this.font.width(t)/2, ly2, color, false);
+                // ★ 自动换行：如果歌词太长，分成多行居中显示
+                String text = line.text;
+                int maxW = w - 40;
+                if (this.font.width(text) <= maxW)
+                {
+                    g.drawString(this.font, Component.literal(text), x+w/2 - this.font.width(text)/2, ly2, color, false);
+                }
+                else
+                {
+                    // 自动换行
+                    java.util.List<net.minecraft.util.FormattedCharSequence> lines = this.font.split(Component.literal(text), maxW);
+                    int startY = ly2 - (lines.size() - 1) * 5;  // 居中多行
+                    for (int li = 0; li < lines.size(); li++)
+                    {
+                        g.drawString(this.font, lines.get(li), x + w/2 - this.font.width(lines.get(li)) / 2, startY + li * 10, color, false);
+                    }
+                }
             }
         }
     }
