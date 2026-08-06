@@ -123,18 +123,19 @@ public class PlayerScreen extends Screen
         volH = 6;
 
         // 搜索框（SEARCH Tab 时显示）
+        searchField = null;  // 先清空
         if (currentTab == Tab.SEARCH)
         {
-            int rx = 8 + LEFT_W + 8;
-            int rw = this.width - rx - 12;
-            searchField = new EditBox(this.font, rx, tabY + tabH + 4, rw - 110, 16, Component.literal("搜索"));
+            int srx = 8 + LEFT_W + 8;
+            int srw = this.width - srx - 12;
+            searchField = new EditBox(this.font, srx, 20, srw - 110, 16, Component.literal("搜索"));
             searchField.setHint(Component.literal("歌曲/歌手/专辑"));
             searchField.setMaxLength(64);
             addRenderableWidget(searchField);
             addRenderableWidget(Button.builder(Component.literal("搜索"), b -> doSearch())
-                    .bounds(rx + rw - 104, tabY + tabH + 4, 50, 16).build());
+                    .bounds(srx + srw - 104, 20, 50, 16).build());
             addRenderableWidget(Button.builder(Component.literal("▶下一首"), b -> addSelectedToNext())
-                    .bounds(rx + rw - 50, tabY + tabH + 4, 48, 16).build());
+                    .bounds(srx + srw - 50, 20, 48, 16).build());
         }
 
         onTabSwitch();
@@ -279,27 +280,25 @@ public class PlayerScreen extends Screen
         int rx = lx + lw + 8, ry = 22, rw = this.width - rx - 8, rh = this.height - 56;
         // 不绘制背景（透明）
 
+        // ★ 裁剪右侧区域（在 translate 之前设置，固定裁剪区域）
+        g.enableScissor(rx, ry, rx + rw, ry + rh);
+
         // ★ 用 PoseStack 偏移实现滚动
         g.pose().pushPose();
         g.pose().translate(0, -rightScrollY, 0);
 
-        // 裁剪右侧区域
-        g.enableScissor(rx, ry, rx + rw, ry + rh);
-
-        // ★ 传递偏移后的 Y 坐标
-        int scrolledRy = ry + rightScrollY;
         switch (currentTab)
         {
             case LYRICS: renderLyrics(g, rx, ry, rw, rh, p, song, ACCENT, NEXT); break;
-            case PLAYLIST: renderPlaylist(g, rx, ry, rw, rh, mouseX, mouseY); break;
-            case SEARCH: renderSearch(g, rx, ry, rw, rh, mouseX, mouseY); break;
-            case QUEUE: renderQueue(g, rx, ry, rw, rh, p, mouseX, mouseY); break;
+            case PLAYLIST: renderPlaylist(g, rx, ry, rw, rh, mouseX, mouseY + rightScrollY); break;
+            case SEARCH: renderSearch(g, rx, ry, rw, rh, mouseX, mouseY + rightScrollY); break;
+            case QUEUE: renderQueue(g, rx, ry, rw, rh, p, mouseX, mouseY + rightScrollY); break;
             case SETTINGS: renderSettings(g, rx, ry, rw, rh, ACCENT, TEXT, DIM); break;
             case ACCOUNT: renderAccount(g, rx, ry, rw, rh, ACCENT, TEXT, DIM); break;
         }
 
-        g.disableScissor();
         g.pose().popPose();
+        g.disableScissor();
 
         // 滚动条
         if (rightScrollMax > 0)
@@ -353,7 +352,8 @@ public class PlayerScreen extends Screen
             g.drawString(this.font, Component.literal("← 返回歌单列表"), x + 4, y + 2, 0xFF00FFFF, false);
             g.drawString(this.font, Component.literal(currentPlaylist.name + " (" + playlistSongs.size() + ")"), x + w/2, y + 2, 0xFFFFFFFF);
             int ly = y + 18;
-            for (int i = 0; i < playlistSongs.size() && ly < y + h; i++)
+            int maxY = y + h + rightScrollY;
+            for (int i = 0; i < playlistSongs.size() && ly < maxY; i++)
             {
                 NeteaseSong s = playlistSongs.get(i);
                 boolean isCur = MusicPlayer.getInstance().getCurrentSong() != null
@@ -375,7 +375,8 @@ public class PlayerScreen extends Screen
             return;
         }
         int ly = y + 2;
-        for (int i = 0; i < playlists.size() && ly < y + h; i++)
+        int maxY = y + h + rightScrollY;
+        for (int i = 0; i < playlists.size() && ly < maxY; i++)
         {
             NeteasePlaylist pl = playlists.get(i);
             boolean hov = mx >= x+4 && mx <= x+w-8 && my >= ly && my < ly + 24;
@@ -389,13 +390,14 @@ public class PlayerScreen extends Screen
 
     private void renderSearch(GuiGraphics g, int x, int y, int w, int h, int mx, int my)
     {
-        // 搜索框在 init 中创建，这里渲染状态
+        // 搜索框在 init 中创建（y=20），这里渲染结果列表
         int statusY = y + 24;
         if (!searchStatus.isEmpty())
             g.drawString(this.font, Component.literal(searchStatus), x + 4, statusY, searchStatusColor, false);
-        if (searchResults.isEmpty()) return;
+        if (searchResults.isEmpty()) { rightScrollMax = 0; return; }
         int ly = statusY + 14;
-        for (int i = 0; i < searchResults.size() && ly < y + h; i++)
+        int maxY = y + h + rightScrollY;  // ★ 允许渲染超出可见区域（scissor 会裁剪）
+        for (int i = 0; i < searchResults.size() && ly < maxY; i++)
         {
             NeteaseSong s = searchResults.get(i);
             boolean isCur = MusicPlayer.getInstance().getCurrentSong() != null
@@ -407,16 +409,17 @@ public class PlayerScreen extends Screen
             if (hov) g.drawString(this.font, Component.literal("[▶下一首]"), x+w-40, ly, 0xFF00FFFF, false);
             ly += 14;
         }
-        rightScrollMax = Math.max(0, searchResults.size() * 14 - h + 40);
+        rightScrollMax = Math.max(0, searchResults.size() * 14 + 38 - h);
     }
 
     private void renderQueue(GuiGraphics g, int x, int y, int w, int h, MusicPlayer p, int mx, int my)
     {
         List<NeteaseSong> q = p.getQueue();
-        if (q.isEmpty()) { g.drawCenteredString(this.font, Component.literal("播放队列为空"), x+w/2, y+h/2, 0xFFAAAAAA); return; }
+        if (q.isEmpty()) { g.drawCenteredString(this.font, Component.literal("播放队列为空"), x+w/2, y+h/2, 0xFFAAAAAA); rightScrollMax = 0; return; }
         g.drawString(this.font, Component.literal("播放队列 (" + q.size() + ") · 当前 " + (p.getQueueIndex()+1)), x+4, y+2, 0xFFFFFFFF, false);
         int ly = y + 18;
-        for (int i = 0; i < q.size() && ly < y + h; i++)
+        int maxY = y + h + rightScrollY;
+        for (int i = 0; i < q.size() && ly < maxY; i++)
         {
             NeteaseSong s = q.get(i);
             boolean isCur = i == p.getQueueIndex();
@@ -427,7 +430,7 @@ public class PlayerScreen extends Screen
             g.drawString(this.font, Component.literal(trunc(s.getDisplayArtist(), 30)), x+8, ly + 7, 0xFF888888, false);
             ly += 14;
         }
-        rightScrollMax = Math.max(0, q.size() * 14 - h + 20);
+        rightScrollMax = Math.max(0, q.size() * 14 + 18 - h);
     }
 
     private void renderSettings(GuiGraphics g, int x, int y, int w, int h, int accent, int text, int dim)
@@ -575,12 +578,14 @@ public class PlayerScreen extends Screen
 
     private void toggleSetting(int adjMy, int adjX, int rx, int rw)
     {
-        int ly = 4;
-        // HUD 项
-        if (adjMy >= ly && adjMy < ly + 14*10)
+        // ★ 设置项从 y+4+14 开始（标题占 14px），每项 14px 高
+        int startY = 4 + 14;  // 标题行 14px
+        int itemH = 14;
+        if (adjMy >= startY && adjMy < startY + itemH * 10)
         {
-            int idx = (adjMy - ly) / 14;
-            if (adjX > rw - 50)
+            int idx = (adjMy - startY) / itemH;
+            // 点击右侧值区域才切换
+            if (adjX > rw / 2)
             {
                 switch (idx)
                 {
