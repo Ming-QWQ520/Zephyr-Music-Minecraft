@@ -85,7 +85,17 @@ public class ClientEventHandler
         }
         else if (KEY_OPEN_PLAYLIST != null && KEY_OPEN_PLAYLIST.consumeClick())
         {
-            mc.setScreen(new PlaylistBrowserScreen());
+            // ★ F7: 打开播放器，如果有 cookie 切换到歌单 Tab，没有则切换到登录 Tab
+            PlayerScreen ps = new PlayerScreen();
+            if (!com.zephyr.music.config.ZephyrConfig.COOKIE.get().isEmpty())
+            {
+                ps.setCurrentTab(PlayerScreen.Tab.PLAYLIST);
+            }
+            else
+            {
+                ps.setCurrentTab(PlayerScreen.Tab.ACCOUNT);
+            }
+            mc.setScreen(ps);
         }
         else if (KEY_OPEN_LOGIN != null && KEY_OPEN_LOGIN.consumeClick())
         {

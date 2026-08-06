@@ -25,7 +25,7 @@ import java.util.*;
  */
 public class PlayerScreen extends Screen
 {
-    private enum Tab { LYRICS, PLAYLIST, SEARCH, QUEUE, SETTINGS, ACCOUNT }
+    public enum Tab { LYRICS, PLAYLIST, SEARCH, QUEUE, SETTINGS, ACCOUNT }
 
     private static final int SIDEBAR_W = 100;
     private static final int CONTROL_H = 52;
@@ -75,6 +75,11 @@ public class PlayerScreen extends Screen
         addRenderableWidget(Button.builder(Component.literal("▶下一首"), b -> addSelectedToNext())
                 .bounds(this.width - 56, 10, 48, 18).build());
 
+        // ★ 预计算进度条位置（避免 mouseClicked 使用旧值）
+        progBarX = SIDEBAR_W + 20;
+        progBarW = this.width - SIDEBAR_W - 40;
+        progBarY = this.height - CONTROL_H + 6;
+
         // Tab 切换时加载数据
         if (currentTab == Tab.PLAYLIST && playlists.isEmpty() && NeteaseSession.getInstance().isLoggedIn())
             NeteaseSession.getInstance().fetchUserPlaylists().thenAccept(list -> { playlists.clear(); playlists.addAll(list); });
@@ -91,6 +96,7 @@ public class PlayerScreen extends Screen
     }
 
     private void switchTab(Tab tab) { currentTab = tab; scroll = 0; clearWidgets(); init(); }
+    public void setCurrentTab(Tab tab) { this.currentTab = tab; }
 
     // === 搜索 ===
     private void doSearch()
@@ -170,9 +176,10 @@ public class PlayerScreen extends Screen
             if (tabs[i] == Tab.ACCOUNT)
             {
                 NeteaseUser u = NeteaseSession.getInstance().getCurrentUser();
-                if (u != null && u.nickname != null && !u.nickname.isEmpty())
+                if (NeteaseSession.getInstance().isLoggedIn() && u != null && u.nickname != null && !u.nickname.isEmpty())
                     label = this.font.width(u.nickname) > 80 ? trunc(u.nickname, 6) : u.nickname;
-                else label = "登录";
+                else
+                    label = "登录";
             }
             if (selected) g.fill(x1, y1, x2, y2, 0xFF2A3A52);
             else if (hovered) g.fill(x1, y1, x2, y2, 0xFF23262F);
@@ -349,25 +356,54 @@ public class PlayerScreen extends Screen
         g.drawString(this.font, Component.literal(ZephyrConfig.SCROBBLE_ENABLED.get() ? "ON" : "OFF"), x + cw - 60, y, accent, false);
     }
 
-    // === 账号页 ===
+    // === 账号/登录页 ===
     private void drawAccount(GuiGraphics g)
     {
-        NeteaseUser u = userDetail != null ? userDetail : NeteaseSession.getInstance().getCurrentUser();
         int cx2 = SIDEBAR_W + (this.width - SIDEBAR_W) / 2;
         int y = 36;
-        if (u == null) { g.drawCenteredString(this.font, Component.literal("未登录"), cx2, y + 40, 0xFFFF6666); return; }
+        int accent = 0xFF4FC3F7, text = 0xFFFFFFFF, dim = 0xFF888888;
+
+        // 未登录时显示登录选项
+        if (!NeteaseSession.getInstance().isLoggedIn())
+        {
+            g.drawCenteredString(this.font, Component.literal("网易云登录"), cx2, y, accent); y += 28;
+
+            // 扫码登录按钮
+            int btnW = 120, btnH = 20, btnX = cx2 - btnW / 2;
+            boolean hv1 = mouseX >= btnX && mouseX <= btnX + btnW && mouseY >= y && mouseY <= y + btnH;
+            g.fill(btnX, y, btnX + btnW, y + btnH, hv1 ? 0xFF2A3A52 : 0xFF23262F);
+            g.drawCenteredString(this.font, Component.literal("扫码登录"), cx2, y + 6, accent);
+            y += btnH + 8;
+
+            // 手机登录按钮
+            boolean hv2 = mouseX >= btnX && mouseX <= btnX + btnW && mouseY >= y && mouseY <= y + btnH;
+            g.fill(btnX, y, btnX + btnW, y + btnH, hv2 ? 0xFF2A3A52 : 0xFF23262F);
+            g.drawCenteredString(this.font, Component.literal("手机登录"), cx2, y + 6, accent);
+            y += btnH + 8;
+
+            // 邮箱登录按钮
+            boolean hv3 = mouseX >= btnX && mouseX <= btnX + btnW && mouseY >= y && mouseY <= y + btnH;
+            g.fill(btnX, y, btnX + btnW, y + btnH, hv3 ? 0xFF2A3A52 : 0xFF23262F);
+            g.drawCenteredString(this.font, Component.literal("邮箱登录"), cx2, y + 6, accent);
+            return;
+        }
+
+        // 已登录：显示用户信息
+        NeteaseUser u = userDetail != null ? userDetail : NeteaseSession.getInstance().getCurrentUser();
+        if (u == null) { g.drawCenteredString(this.font, Component.literal("加载中..."), cx2, y + 40, dim); return; }
+
         // 头像
         int avSz = 56, avX = cx2 - avSz / 2;
         renderCover(g, u.avatarUrl, avX, y, avSz);
         y += avSz + 8;
-        g.drawCenteredString(this.font, Component.literal(u.nickname), cx2, y, 0xFFFFFFFF); y += 14;
+        g.drawCenteredString(this.font, Component.literal(u.nickname), cx2, y, text); y += 14;
         int ix = SIDEBAR_W + 20;
-        g.drawString(this.font, Component.literal("🆔 ID: " + u.userId), ix, y, 0xFF888888, false); y += 16;
-        g.drawString(this.font, Component.literal("🎵 听歌: " + (u.listenSongs > 0 ? u.listenSongs + "首" : "未知")), ix, y, 0xFF4FC3F7, false); y += 16;
-        g.drawString(this.font, Component.literal("📊 等级: " + (u.level > 0 ? "Lv." + u.level : "未知")), ix, y, 0xFF4FC3F7, false); y += 16;
-        g.drawString(this.font, Component.literal("📅 注册: " + fmtDate(u.createTime)), ix, y, 0xFF888888, false); y += 16;
-        g.drawString(this.font, Component.literal("📍 地区: " + RegionCodeMapper.formatLocation(u.province, u.city)), ix, y, 0xFF888888, false); y += 16;
-        g.drawString(this.font, Component.literal("⚧ 性别: " + (u.gender == 1 ? "男" : u.gender == 2 ? "女" : "保密")), ix, y, 0xFF888888, false); y += 24;
+        g.drawString(this.font, Component.literal("🆔 ID: " + u.userId), ix, y, dim, false); y += 16;
+        g.drawString(this.font, Component.literal("🎵 听歌: " + (u.listenSongs > 0 ? u.listenSongs + "首" : "未知")), ix, y, accent, false); y += 16;
+        g.drawString(this.font, Component.literal("📊 等级: " + (u.level > 0 ? "Lv." + u.level : "未知")), ix, y, accent, false); y += 16;
+        g.drawString(this.font, Component.literal("📅 注册: " + fmtDate(u.createTime)), ix, y, dim, false); y += 16;
+        g.drawString(this.font, Component.literal("📍 地区: " + RegionCodeMapper.formatLocation(u.province, u.city)), ix, y, dim, false); y += 16;
+        g.drawString(this.font, Component.literal("⚧ 性别: " + (u.gender == 1 ? "男" : u.gender == 2 ? "女" : "保密")), ix, y, dim, false); y += 24;
         // 退出登录按钮
         int btnW = 80, btnX = cx2 - btnW / 2;
         boolean hv = mouseX >= btnX && mouseX <= btnX + btnW && mouseY >= y && mouseY <= y + 18;
@@ -529,14 +565,33 @@ public class PlayerScreen extends Screen
                     toggleSetting((int)(my - 36 + scroll), (int)(mx - contentX));
                     break;
                 case ACCOUNT:
-                    NeteaseUser u = userDetail;
-                    if (u != null)
+                    if (!NeteaseSession.getInstance().isLoggedIn())
+                    {
+                        // 登录按钮点击 → 跳转到独立登录界面
+                        int cx2 = SIDEBAR_W + (this.width - SIDEBAR_W) / 2;
+                        int btnW = 120, btnX = cx2 - btnW / 2;
+                        int loginY = 36 + 28;
+                        // 扫码登录
+                        if (mx >= btnX && mx <= btnX + btnW && my >= loginY && my <= loginY + 20)
+                        { Minecraft.getInstance().setScreen(new LoginScreen()); return true; }
+                        // 手机登录
+                        if (mx >= btnX && mx <= btnX + btnW && my >= loginY + 28 && my <= loginY + 48)
+                        { Minecraft.getInstance().setScreen(new LoginScreen()); return true; }
+                        // 邮箱登录
+                        if (mx >= btnX && mx <= btnX + btnW && my >= loginY + 56 && my <= loginY + 76)
+                        { Minecraft.getInstance().setScreen(new LoginScreen()); return true; }
+                    }
+                    else
                     {
                         // 退出登录按钮
-                        int cx2 = SIDEBAR_W + (this.width - SIDEBAR_W) / 2;
-                        int btnY = 36 + 56 + 8 + 14 + 16 * 7;
-                        if (mx >= cx2 - 40 && mx <= cx2 + 40 && my >= btnY && my <= btnY + 18)
-                        { NeteaseSession.getInstance().logout().thenAccept(v -> Minecraft.getInstance().execute(() -> Minecraft.getInstance().setScreen(new LoginScreen()))); return true; }
+                        NeteaseUser u = userDetail;
+                        if (u != null)
+                        {
+                            int cx2 = SIDEBAR_W + (this.width - SIDEBAR_W) / 2;
+                            int btnY = 36 + 56 + 8 + 14 + 16 * 7;
+                            if (mx >= cx2 - 40 && mx <= cx2 + 40 && my >= btnY && my <= btnY + 18)
+                            { NeteaseSession.getInstance().logout().thenAccept(v -> Minecraft.getInstance().execute(() -> { userDetail = null; switchTab(Tab.ACCOUNT); })); return true; }
+                        }
                     }
                     break;
             }

@@ -749,8 +749,7 @@ public class MusicPlayer
     public void seekTo(double targetSec)
     {
         NeteaseSong song = currentSong.get();
-        if (song == null) return;
-        // 钳制到有效范围
+        if (song == null) { ZephyrMusic.LOGGER.warn("[Zephyr] seekTo: no song"); return; }
         double total = song.duration > 0 ? song.duration / 1000.0 : 0;
         if (total > 0 && targetSec > total) targetSec = total;
         if (targetSec < 0) targetSec = 0;
@@ -758,19 +757,21 @@ public class MusicPlayer
         SourceDataLine line = currentLine;
         if (line != null)
         {
-            // 调整 offset 使 getPositionSec 返回 targetSec
-            // targetSec = positionOffsetSec + (curPosUs - lineStartPosUs) / 1e6
-            // positionOffsetSec = targetSec - (curPosUs - lineStartPosUs) / 1e6
             long curPosUs = line.getMicrosecondPosition();
+            double oldPos = positionOffsetSec + (curPosUs - lineStartPosUs) / 1_000_000.0;
             positionOffsetSec = targetSec - (curPosUs - lineStartPosUs) / 1_000_000.0;
+            lastReturnedPos = targetSec;
+            ZephyrMusic.LOGGER.info("[Zephyr] Seek: {}s -> {}s (offset={}, linePos={}us, oldPos={})",
+                    String.format("%.1f", oldPos), String.format("%.1f", targetSec),
+                    String.format("%.1f", positionOffsetSec), curPosUs, String.format("%.1f", oldPos));
         }
         else
         {
             positionOffsetSec = targetSec;
             lineStartPosUs = 0;
+            lastReturnedPos = targetSec;
+            ZephyrMusic.LOGGER.info("[Zephyr] Seek (no line): {}s", String.format("%.1f", targetSec));
         }
-        lastReturnedPos = targetSec;
-        ZephyrMusic.LOGGER.info("[Zephyr] Seek to {}s (offset={})", String.format("%.1f", targetSec), String.format("%.1f", positionOffsetSec));
     }
 
     public void shutdown()
