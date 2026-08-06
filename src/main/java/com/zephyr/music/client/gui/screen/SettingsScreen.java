@@ -57,12 +57,6 @@ public class SettingsScreen extends Screen
 
     private class SettingsList extends ObjectSelectionList<SettingsList.Entry>
     {
-        
-        @Override
-        public int getRowWidth()
-        {
-            return this.width - 8;
-        }
 
         public SettingsList()
         {

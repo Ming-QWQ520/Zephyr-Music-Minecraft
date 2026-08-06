@@ -244,12 +244,6 @@ public class PlaylistBrowserScreen extends Screen
     /** 歌单列表 */
     class PlaylistList extends ObjectSelectionList<PlaylistList.Entry>
     {
-        
-        @Override
-        public int getRowWidth()
-        {
-            return this.width - 8;
-        }
 
         public PlaylistList(Minecraft mc, int width, int height, int y0, int y1, int itemHeight)
         {
@@ -306,12 +300,6 @@ public class PlaylistBrowserScreen extends Screen
     /** 歌曲列表 */
     class SongList extends ObjectSelectionList<SongList.Entry>
     {
-        
-        @Override
-        public int getRowWidth()
-        {
-            return this.width - 8;
-        }
 
         public SongList(Minecraft mc, int width, int height, int y0, int y1, int itemHeight)
         {

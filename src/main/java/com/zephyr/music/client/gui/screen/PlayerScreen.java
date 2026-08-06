@@ -235,8 +235,7 @@ public class PlayerScreen extends Screen
         int cx2 = lx + (lw - COVER_SIZE) / 2;
         int cy2 = ly + 10;
         if (song != null) renderCover(g, song.picUrl, cx2, cy2, COVER_SIZE);
-        else { ModernUI.fillRound(g, cx2, cy2, COVER_SIZE, COVER_SIZE, 8, 0xFF1A1A1A);
-            g.drawCenteredString(this.font, Component.literal("♪"), cx2 + COVER_SIZE/2, cy2 + COVER_SIZE/2 - 4, DIM); }
+        // 无封面时不绘制背景
 
         // 歌曲信息
         int iy = cy2 + COVER_SIZE + 8;
@@ -278,11 +277,17 @@ public class PlayerScreen extends Screen
 
         // === 右侧面板 ===
         int rx = lx + lw + 8, ry = 22, rw = this.width - rx - 8, rh = this.height - 56;
-        ModernUI.fillRound(g, rx, ry, rw, rh, 8, 0x801a1a2e);
+        // 不绘制背景（透明）
+
+        // ★ 用 PoseStack 偏移实现滚动
+        g.pose().pushPose();
+        g.pose().translate(0, -rightScrollY, 0);
 
         // 裁剪右侧区域
         g.enableScissor(rx, ry, rx + rw, ry + rh);
 
+        // ★ 传递偏移后的 Y 坐标
+        int scrolledRy = ry + rightScrollY;
         switch (currentTab)
         {
             case LYRICS: renderLyrics(g, rx, ry, rw, rh, p, song, ACCENT, NEXT); break;
@@ -294,6 +299,7 @@ public class PlayerScreen extends Screen
         }
 
         g.disableScissor();
+        g.pose().popPose();
 
         // 滚动条
         if (rightScrollMax > 0)
@@ -645,13 +651,16 @@ public class PlayerScreen extends Screen
     }
     private void renderCover(GuiGraphics g, String url, int x, int y, int sz)
     {
-        if (url == null || url.isEmpty()) { ModernUI.fillRound(g, x, y, sz, sz, 8, 0xFF1A1A1A);
-            g.drawCenteredString(this.font, Component.literal("♪"), x+sz/2, y+sz/2-4, 0xFF888888); return; }
+        if (url == null || url.isEmpty()) { return; }
         ResourceLocation tid = CoverTextureManager.getInstance().getCover(url, null);
-        if (tid != null) { RenderSystem.setShaderTexture(0, tid); RenderSystem.enableBlend();
-            RenderSystem.setShaderColor(1f, 1f, 1f, 1f); g.blit(tid, x, y, 0, 0, sz, sz, sz, sz); RenderSystem.disableBlend(); }
-        else { ModernUI.fillRound(g, x, y, sz, sz, 8, 0xFF1A1A1A);
-            g.drawCenteredString(this.font, Component.literal("..."), x+sz/2, y+sz/2-4, 0xFF888888); }
+        if (tid != null)
+        {
+            RenderSystem.setShaderTexture(0, tid);
+            RenderSystem.enableBlend();
+            RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
+            g.blit(tid, x, y, 0, 0, sz, sz, sz, sz);
+            RenderSystem.disableBlend();
+        }
     }
     private int findCur(List<LyricLine> lyrics, double pos) { int idx = -1;
         for (int i = 0; i < lyrics.size(); i++) { if (lyrics.get(i).time <= pos) idx = i; else break; } return idx; }

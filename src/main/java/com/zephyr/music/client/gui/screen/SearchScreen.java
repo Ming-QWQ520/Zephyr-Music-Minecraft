@@ -201,12 +201,6 @@ public class SearchScreen extends Screen
     /** 搜索结果列表项 */
     class SearchList extends ObjectSelectionList<SearchList.Entry>
     {
-        
-        @Override
-        public int getRowWidth()
-        {
-            return this.width - 8;
-        }
 
         public SearchList(Minecraft mc, int width, int height, int y0, int y1, int itemHeight)
         {

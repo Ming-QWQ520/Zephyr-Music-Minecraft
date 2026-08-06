@@ -104,12 +104,6 @@ public class QueueScreen extends Screen
 
     class QueueList extends ObjectSelectionList<QueueList.Entry>
     {
-        
-        @Override
-        public int getRowWidth()
-        {
-            return this.width - 8;
-        }
 
         public QueueList(Minecraft mc, int width, int height, int y0, int y1, int itemHeight)
         {
