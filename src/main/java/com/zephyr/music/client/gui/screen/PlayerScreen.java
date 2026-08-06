@@ -1,8 +1,6 @@
 package com.zephyr.music.client.gui.screen;
 
-import com.google.gson.JsonObject;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.zephyr.music.ZephyrMusic;
 import com.zephyr.music.api.*;
 import com.zephyr.music.client.audio.CoverTextureManager;
 import com.zephyr.music.client.audio.MusicPlayer;
@@ -12,455 +10,304 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.FormattedCharSequence;
+import com.google.gson.JsonObject;
 
 import java.util.*;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * Zephyr Music 全集成播放器界面
+ * 全集成播放器界面 - 借鉴 InGameMusic 设计
  *
- * 所有功能集成在一个界面内，通过 Tab 切换：
- * - 左侧面板（固定）：封面 + 歌曲信息 + 进度条 + 播放控制 + 音量条
- * - 右侧面板（Tab 切换）：歌词 / 歌单 / 搜索 / 队列 / 设置 / 账号
- *
- * 不跳转到任何独立 Screen，所有交互在当前界面内完成
+ * 左侧边栏(Tab) + 右侧内容区 + 底部控制条
  */
 public class PlayerScreen extends Screen
 {
     private enum Tab { LYRICS, PLAYLIST, SEARCH, QUEUE, SETTINGS, ACCOUNT }
 
+    private static final int SIDEBAR_W = 100;
+    private static final int CONTROL_H = 52;
+    private static final int ROW_H = 36;
+
     private Tab currentTab = Tab.LYRICS;
-    private int scrollOffset = 0;
-
-    // 左侧面板
-    private static final int LEFT_W = 220;
-    private static final int COVER_SIZE = 120;
-
-    // 进度条/音量条
-    private int progX, progY, progW, progH;
-    private int volX, volY, volW, volH;
-    private boolean progDrag, volDrag;
+    private double mouseX, mouseY;
 
     // 搜索
-    private EditBox searchField;
+    private EditBox searchBox;
     private final List<NeteaseSong> searchResults = new ArrayList<>();
-    private String searchStatus = "输入关键词后搜索";
+    private String searchStatus = "";
     private int searchStatusColor = 0xFFAAAAAA;
 
-    // 歌单数据
+    // 歌单
     private final List<NeteasePlaylist> playlists = new ArrayList<>();
     private final List<NeteaseSong> playlistSongs = new ArrayList<>();
     private NeteasePlaylist currentPlaylist;
     private boolean showPlaylistSongs = false;
 
-    // 队列/设置/账号
-    private NeteaseUser userDetail;
-    private String settingsStatus = "";
+    // 滚动
+    private double scroll = 0;
 
-    // 右侧滚动
-    private int rightScrollY = 0;
-    private int rightScrollMax = 0;
+    // 进度条/音量条拖动
+    private boolean progDrag = false, volDrag = false;
+    private int progBarX, progBarY, progBarW;
+    private int volBarX, volBarY, volBarW;
+
+    // 账号
+    private NeteaseUser userDetail;
 
     public PlayerScreen() { super(Component.literal("Zephyr Music")); }
 
     @Override
     protected void init()
     {
-        MusicPlayer p = MusicPlayer.getInstance();
-        int bottomY = this.height - 28;
+        // 搜索框
+        searchBox = new EditBox(this.font, SIDEBAR_W + 12, 12, this.width - SIDEBAR_W - 130, 16, Component.literal(""));
+        searchBox.setHint(Component.literal("搜索歌曲/歌手..."));
+        searchBox.setMaxLength(64);
+        searchBox.visible = (currentTab == Tab.SEARCH);
+        addRenderableWidget(searchBox);
 
-        // === Tab 栏 ===
-        int tabY = 4;
-        int tabH = 14;
-        String[] tabNames = {"歌词", "歌单", "搜索", "队列", "设置", "账号"};
-        Tab[] tabVals = Tab.values();
-        int tabW = 36;
-        for (int i = 0; i < tabNames.length; i++)
-        {
-            final Tab tab = tabVals[i];
-            boolean active = currentTab == tab;
-            String label = active ? "▸" + tabNames[i] : tabNames[i];
-            if (tab == Tab.ACCOUNT)
-            {
-                NeteaseUser u = NeteaseSession.getInstance().getCurrentUser();
-                if (u != null && u.nickname != null && !u.nickname.isEmpty())
-                    label = active ? "▸" + trunc(u.nickname, 5) : trunc(u.nickname, 5);
-                else
-                    label = active ? "▸登录" : "登录";
-            }
-            addRenderableWidget(Button.builder(Component.literal(label), b -> {
-                        currentTab = tab;
-                        rightScrollY = 0;
-                        clearWidgets();
-                        init();
-                    })
-                    .bounds(8 + i * (tabW + 2), tabY, tabW, tabH).build());
-        }
-        addRenderableWidget(Button.builder(Component.literal("✕"), b -> onClose())
-                .bounds(this.width - 18, tabY, 14, tabH).build());
+        // 搜索按钮
+        addRenderableWidget(Button.builder(Component.literal("搜索"), b -> doSearch())
+                .bounds(this.width - 110, 10, 50, 18).build());
+        addRenderableWidget(Button.builder(Component.literal("▶下一首"), b -> addSelectedToNext())
+                .bounds(this.width - 56, 10, 48, 18).build());
 
-        // === 左侧播放控制 ===
-        int lx = 8;
-        // 上一首 / 播放暂停 / 下一首 / 循环
-        addRenderableWidget(Button.builder(Component.literal("⏮"), b -> p.prev()).bounds(lx, bottomY, 28, 16).build());
-        String pb = p.isPaused() ? "▶" : (p.isPlaying() ? "⏸" : "▶");
-        addRenderableWidget(Button.builder(Component.literal(pb), b -> {
-                    if (p.isPlaying()) { if (p.isPaused()) p.resume(); else p.pause(); }
-                }).bounds(lx + 30, bottomY, 34, 16).build());
-        addRenderableWidget(Button.builder(Component.literal("⏭"), b -> p.next()).bounds(lx + 66, bottomY, 28, 16).build());
-        addRenderableWidget(Button.builder(Component.literal(p.isLoopMode() ? "🔁" : "➡"), b -> {
-                    p.setLoopMode(!p.isLoopMode());
-                    b.setMessage(Component.literal(p.isLoopMode() ? "🔁" : "➡"));
-                }).bounds(lx + 96, bottomY, 28, 16).build());
-
-        // 音量条
-        volX = lx + 130;
-        volY = bottomY + 5;
-        volW = 68;
-        volH = 6;
-
-        // ★ 预计算进度条坐标（避免 mouseClicked 用到旧值）
-        int progLx = 8;
-        int progLw = LEFT_W;
-        progX = progLx + 10;
-        progW = progLw - 20;
-        progY = 22 + 10 + COVER_SIZE + 8 + 12 + 12 + 28 + 12;  // 封面+歌名+艺术家+进度条时间行+12
-        progH = 6;
-
-        // 搜索框（SEARCH Tab 时显示）
-        searchField = null;  // 先清空
-        if (currentTab == Tab.SEARCH)
-        {
-            int srx = 8 + LEFT_W + 8;
-            int srw = this.width - srx - 12;
-            searchField = new EditBox(this.font, srx, 20, srw - 110, 16, Component.literal("搜索"));
-            searchField.setHint(Component.literal("歌曲/歌手/专辑"));
-            searchField.setMaxLength(64);
-            addRenderableWidget(searchField);
-            addRenderableWidget(Button.builder(Component.literal("搜索"), b -> doSearch())
-                    .bounds(srx + srw - 104, 20, 50, 16).build());
-            addRenderableWidget(Button.builder(Component.literal("▶下一首"), b -> addSelectedToNext())
-                    .bounds(srx + srw - 50, 20, 48, 16).build());
-        }
-
-        onTabSwitch();
-    }
-
-    private void onTabSwitch()
-    {
+        // Tab 切换时加载数据
         if (currentTab == Tab.PLAYLIST && playlists.isEmpty() && NeteaseSession.getInstance().isLoggedIn())
-        {
-            NeteaseSession.getInstance().fetchUserPlaylists().thenAccept(list -> {
-                playlists.clear();
-                playlists.addAll(list);
-            });
-        }
+            NeteaseSession.getInstance().fetchUserPlaylists().thenAccept(list -> { playlists.clear(); playlists.addAll(list); });
         if (currentTab == Tab.ACCOUNT && userDetail == null)
         {
             NeteaseUser base = NeteaseSession.getInstance().getCurrentUser();
             if (base != null && base.userId != 0)
-            {
                 NeteaseSession.getInstance().getApi().userDetail(base.userId).thenAccept(resp -> {
                     userDetail = NeteaseApi.parseUserDetail(resp, base);
-                    if (userDetail != null)
-                        NeteaseSession.getInstance().updateCurrentUser(userDetail);
+                    if (userDetail != null) NeteaseSession.getInstance().updateCurrentUser(userDetail);
                 });
-            }
             else userDetail = base;
         }
     }
 
+    private void switchTab(Tab tab) { currentTab = tab; scroll = 0; clearWidgets(); init(); }
+
     // === 搜索 ===
     private void doSearch()
     {
-        if (searchField == null) return;
-        String kw = searchField.getValue().trim();
-        if (kw.isEmpty()) { searchStatus = "请输入关键词"; searchStatusColor = 0xFFFF5555; return; }
-        searchStatus = "搜索中: " + kw;
-        searchStatusColor = 0xFFFFFFFF;
-        searchResults.clear();
+        if (searchBox == null) return;
+        String kw = searchBox.getValue().trim();
+        if (kw.isEmpty()) { searchStatus = "请输入关键词"; searchStatusColor = 0xFFFF6666; return; }
+        searchStatus = "搜索中..."; searchStatusColor = 0xFFCCCCCC; searchResults.clear();
         NeteaseSession.getInstance().getApi().search(kw, 50, 0).thenAccept(resp -> {
             List<NeteaseSong> songs = NeteaseApi.parseSongs(resp, "songs");
             Minecraft.getInstance().execute(() -> {
-                searchResults.clear();
-                searchResults.addAll(songs);
-                rightScrollY = 0;
+                searchResults.clear(); searchResults.addAll(songs); scroll = 0;
                 searchStatus = songs.isEmpty() ? "无结果" : "找到 " + songs.size() + " 首";
-                searchStatusColor = songs.isEmpty() ? 0xFFFF5555 : 0xFF00FFFF;
+                searchStatusColor = songs.isEmpty() ? 0xFFFF6666 : 0xFF4FC3F7;
             });
         });
     }
-
     private void addSelectedToNext()
     {
-        // 简化：添加第一首搜索结果
         if (!searchResults.isEmpty())
-        {
-            MusicPlayer.getInstance().playNext(searchResults.get(0));
-            searchStatus = "已设为下一首: " + searchResults.get(0).name;
-            searchStatusColor = 0xFF00FFFF;
-        }
+        { MusicPlayer.getInstance().playNext(searchResults.get(0)); searchStatus = "已设为下一首"; searchStatusColor = 0xFF4FC3F7; }
     }
 
     // === 歌单 ===
     private void openPlaylist(NeteasePlaylist pl)
     {
-        currentPlaylist = pl;
-        showPlaylistSongs = true;
-        playlistSongs.clear();
+        currentPlaylist = pl; showPlaylistSongs = true; playlistSongs.clear();
         NeteaseSession.getInstance().getApi().playlistTrackAll(pl.id, 300, 0).thenAccept(resp -> {
             List<NeteaseSong> songs = NeteaseApi.parseSongs(resp, "songs");
-            if (songs.isEmpty() && resp.has("playlist") && resp.get("playlist").isJsonObject())
-            {
-                JsonObject plobj = resp.getAsJsonObject("playlist");
-                if (plobj.has("tracks") && plobj.get("tracks").isJsonArray())
-                    songs = NeteaseApi.parseSongs(plobj, "tracks");
-            }
-            final List<NeteaseSong> finalSongs = songs;
-            Minecraft.getInstance().execute(() -> {
-                playlistSongs.clear();
-                playlistSongs.addAll(finalSongs);
-                rightScrollY = 0;
-            });
+            if (songs.isEmpty() && resp.has("playlist"))
+            { JsonObject p = resp.getAsJsonObject("playlist"); if (p.has("tracks")) songs = NeteaseApi.parseSongs(p, "tracks"); }
+            final List<NeteaseSong> fs = songs;
+            Minecraft.getInstance().execute(() -> { playlistSongs.clear(); playlistSongs.addAll(fs); scroll = 0; });
         });
     }
 
-    // === 渲染 ===
+    // ==================== 渲染 ====================
     @Override
-    public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick)
+    public void render(GuiGraphics g, int mx, int my, float delta)
+    {
+        this.mouseX = mx; this.mouseY = my;
+        // 不绘制默认背景
+
+        // 搜索框可见性
+        searchBox.visible = (currentTab == Tab.SEARCH);
+
+        drawSidebar(g);
+        switch (currentTab)
+        {
+            case LYRICS -> drawLyrics(g);
+            case PLAYLIST -> drawPlaylist(g);
+            case SEARCH -> drawSearch(g);
+            case QUEUE -> drawQueue(g);
+            case SETTINGS -> drawSettings(g);
+            case ACCOUNT -> drawAccount(g);
+        }
+        drawControlBar(g);
+        super.render(g, mx, my, delta);
+    }
+
+    // === 左侧边栏 ===
+    private void drawSidebar(GuiGraphics g)
+    {
+        g.fill(0, 0, SIDEBAR_W, this.height, 0xFF1B1D24);
+        g.fill(SIDEBAR_W - 1, 0, SIDEBAR_W, this.height, 0xFF2E3240);
+        g.drawCenteredString(this.font, Component.literal("Zephyr"), SIDEBAR_W / 2, 8, 0xFF4FC3F7);
+
+        Tab[] tabs = Tab.values();
+        String[] labels = {"歌词", "歌单", "搜索", "队列", "设置", "账号"};
+        int y = 34;
+        for (int i = 0; i < tabs.length; i++)
+        {
+            int x1 = 6, y1 = y, x2 = SIDEBAR_W - 6, y2 = y + 30;
+            boolean hovered = mouseX >= x1 && mouseX <= x2 && mouseY >= y1 && mouseY <= y2;
+            boolean selected = currentTab == tabs[i];
+            String label = labels[i];
+            if (tabs[i] == Tab.ACCOUNT)
+            {
+                NeteaseUser u = NeteaseSession.getInstance().getCurrentUser();
+                if (u != null && u.nickname != null && !u.nickname.isEmpty())
+                    label = this.font.width(u.nickname) > 80 ? trunc(u.nickname, 6) : u.nickname;
+                else label = "登录";
+            }
+            if (selected) g.fill(x1, y1, x2, y2, 0xFF2A3A52);
+            else if (hovered) g.fill(x1, y1, x2, y2, 0xFF23262F);
+            g.drawCenteredString(this.font, Component.literal(label), (x1 + x2) / 2, y1 + (30 - 8) / 2, selected ? 0xFF4FC3F7 : 0xFFCCCCCC);
+            y += 34;
+        }
+    }
+
+    // === 歌词页 ===
+    private void drawLyrics(GuiGraphics g)
     {
         MusicPlayer p = MusicPlayer.getInstance();
         NeteaseSong song = p.getCurrentSong();
-        final int ACCENT = 0xFF00FFFF, TEXT = 0xFFFFFFFF, DIM = 0xFFAAAAAA, NEXT = 0xFFCCCCCC;
-
-        // === 左侧面板 ===（无背景）
-        int lx = 8, ly = 22, lw = LEFT_W, lh = this.height - 56;
-
-        // 封面
-        int cx2 = lx + (lw - COVER_SIZE) / 2;
-        int cy2 = ly + 10;
-        if (song != null) renderCover(g, song.picUrl, cx2, cy2, COVER_SIZE);
-        // 无封面时不绘制背景
-
-        // 歌曲信息
-        int iy = cy2 + COVER_SIZE + 8;
-        if (song != null)
-        {
-            g.drawCenteredString(this.font, Component.literal(trunc(song.name, 22)), lx + lw/2, iy, TEXT);
-            g.drawCenteredString(this.font, Component.literal(trunc(song.getDisplayArtist(), 24)), lx + lw/2, iy + 12, DIM);
-        }
-        else
-        {
-            g.drawCenteredString(this.font, Component.literal("未播放"), lx + lw/2, iy, DIM);
-            g.drawCenteredString(this.font, Component.literal("选择歌曲开始"), lx + lw/2, iy + 12, 0xFF888888);
-        }
-
-        // 进度条
-        iy += 28;
-        if (song != null)
-        {
-            double pos = p.getPositionSec();
-            double total = song.duration > 0 ? song.duration / 1000.0 : 0;
-            double prog = total > 0 ? Math.min(1, pos / total) : 0;
-            g.drawString(this.font, Component.literal(fmtTime(pos)), lx + 10, iy, ACCENT, false);
-            String tt = fmtTime(total);
-            g.drawString(this.font, Component.literal(tt), lx + lw - 10 - this.font.width(tt), iy, DIM, false);
-            int bx = lx + 10, bw = lw - 20, by = iy + 12;
-            progX = bx; progY = by; progW = bw; progH = 6;
-            ModernUI.drawProgressBar(g, bx, by, bw, 4, prog);
-            int fw = (int)(bw * prog);
-            g.fill(bx + fw - 1, by - 2, bx + fw + 3, by + 6, ACCENT);
-        }
-
-        // 音量条
-        int vy = this.height - 26;
-        float vol = p.getVolume();
-        String vi = vol <= 0 ? "🔇" : (vol < 0.5 ? "🔉" : "🔊");
-        g.drawString(this.font, Component.literal(vi), volX - 14, vy - 1, DIM, false);
-        ModernUI.drawProgressBar(g, volX, volY, volW, volH, vol);
-        g.drawString(this.font, Component.literal((int)(vol*100) + "%"), volX + volW + 3, vy - 1, DIM, false);
-
-        // === 右侧面板 ===
-        int rx = lx + lw + 8, ry = 22, rw = this.width - rx - 8, rh = this.height - 56;
-        // 不绘制背景（透明）
-
-        // ★ 裁剪右侧区域（在 translate 之前设置，固定裁剪区域）
-        g.enableScissor(rx, ry, rx + rw, ry + rh);
-
-        // ★ 用 PoseStack 偏移实现滚动
-        g.pose().pushPose();
-        g.pose().translate(0, -rightScrollY, 0);
-
-        switch (currentTab)
-        {
-            case LYRICS: renderLyrics(g, rx, ry, rw, rh, p, song, ACCENT, NEXT); break;
-            case PLAYLIST: renderPlaylist(g, rx, ry, rw, rh, mouseX, mouseY + rightScrollY); break;
-            case SEARCH: renderSearch(g, rx, ry, rw, rh, mouseX, mouseY + rightScrollY); break;
-            case QUEUE: renderQueue(g, rx, ry, rw, rh, p, mouseX, mouseY + rightScrollY); break;
-            case SETTINGS: renderSettings(g, rx, ry, rw, rh, ACCENT, TEXT, DIM); break;
-            case ACCOUNT: renderAccount(g, rx, ry, rw, rh, ACCENT, TEXT, DIM); break;
-        }
-
-        g.pose().popPose();
-        g.disableScissor();
-
-        // 滚动条
-        if (rightScrollMax > 0)
-        {
-            int sbX = rx + rw - 4;
-            int sbH = rh - 4;
-            int thumbH = Math.max(20, sbH * rh / (rh + rightScrollMax));
-            int thumbY = ry + 2 + (int)((float)rightScrollY / rightScrollMax * (sbH - thumbH));
-            g.fill(sbX, ry + 2, sbX + 2, ry + 2 + sbH, 0x40FFFFFF);
-            g.fill(sbX, thumbY, sbX + 2, thumbY + thumbH, 0x80FFFFFF);
-        }
-
-        super.render(g, mouseX, mouseY, partialTick);
-    }
-
-    // === 各 Tab 渲染 ===
-    private void renderLyrics(GuiGraphics g, int x, int y, int w, int h, MusicPlayer p, NeteaseSong song, int accent, int next)
-    {
-        if (song == null) { g.drawCenteredString(this.font, Component.literal("暂无播放"), x+w/2, y+h/2-4, 0xFFAAAAAA); return; }
+        int cx = SIDEBAR_W + (this.width - SIDEBAR_W) / 2;
+        int cy = (this.height - CONTROL_H) / 2;
+        if (song == null) { g.drawCenteredString(this.font, Component.literal("暂无播放"), cx, cy, 0xFF888888); return; }
         double pos = p.getPositionSec();
         List<LyricLine> lyrics = p.getCurrentLyrics();
-        if (lyrics == null || lyrics.isEmpty()) { g.drawCenteredString(this.font, Component.literal("（暂无歌词）"), x+w/2, y+h/2-4, 0xFF888888); return; }
+        if (lyrics == null || lyrics.isEmpty()) { g.drawCenteredString(this.font, Component.literal("（暂无歌词）"), cx, cy, 0xFF888888); return; }
         int cur = findCur(lyrics, pos);
-        if (cur < 0) { g.drawCenteredString(this.font, Component.literal("♪ ~ ~ ~"), x+w/2, y+h/2-4, accent); return; }
-        int lh = 20, cy = y + h/2, max = Math.max(5, Math.min(13, h/lh)), half = max/2;
+        if (cur < 0) { g.drawCenteredString(this.font, Component.literal("♪ ~ ~ ~"), cx, cy, 0xFF4FC3F7); return; }
+        int lh = 20, max = 13, half = max / 2;
         for (int off = -half; off <= half; off++)
         {
             int idx = cur + off;
             if (idx < 0 || idx >= lyrics.size()) continue;
             LyricLine line = lyrics.get(idx);
             boolean act = off == 0;
-            int ly2 = cy + off * lh - lh/2;
-            int alpha = act ? 255 : (int)(140 * (1 - Math.abs(off)/(double)(half+1)));
+            int ly = cy + off * lh - lh / 2;
+            int alpha = act ? 255 : (int)(140 * (1 - Math.abs(off) / (double)(half + 1)));
             if (alpha < 40) alpha = 40;
-            int color = act ? accent : ModernUI.withAlpha(next, alpha);
+            int color = act ? 0xFF4FC3F7 : ModernUI.withAlpha(0xFFCCCCCC, alpha);
+            int maxW = this.width - SIDEBAR_W - 40;
             if (act && line.isYrc && ZephyrConfig.LYRIC_KARAOKE.get())
-                renderKaraoke(g, line, x+w/2, ly2, w-40, pos);
+                renderKaraoke(g, line, cx, ly, maxW, pos);
             else
             {
-                // ★ 自动换行：如果歌词太长，分成多行居中显示
                 String text = line.text;
-                int maxW = w - 40;
                 if (this.font.width(text) <= maxW)
-                {
-                    g.drawString(this.font, Component.literal(text), x+w/2 - this.font.width(text)/2, ly2, color, false);
-                }
+                    g.drawCenteredString(this.font, Component.literal(text), cx, ly, color);
                 else
                 {
-                    // 自动换行
-                    java.util.List<net.minecraft.util.FormattedCharSequence> lines = this.font.split(Component.literal(text), maxW);
-                    int startY = ly2 - (lines.size() - 1) * 5;  // 居中多行
+                    List<FormattedCharSequence> lines = this.font.split(Component.literal(text), maxW);
+                    int sy = ly - (lines.size() - 1) * 5;
                     for (int li = 0; li < lines.size(); li++)
-                    {
-                        g.drawString(this.font, lines.get(li), x + w/2 - this.font.width(lines.get(li)) / 2, startY + li * 10, color, false);
-                    }
+                        g.drawCenteredString(this.font, lines.get(li), cx, sy + li * 10, color);
                 }
             }
         }
     }
 
-    private void renderPlaylist(GuiGraphics g, int x, int y, int w, int h, int mx, int my)
+    // === 歌单页 ===
+    private void drawPlaylist(GuiGraphics g)
     {
+        int cx2 = SIDEBAR_W, cw = this.width - SIDEBAR_W;
         if (showPlaylistSongs && currentPlaylist != null)
         {
-            // 返回按钮提示
-            g.drawString(this.font, Component.literal("← 返回歌单列表"), x + 4, y + 2, 0xFF00FFFF, false);
-            g.drawString(this.font, Component.literal(currentPlaylist.name + " (" + playlistSongs.size() + ")"), x + w/2, y + 2, 0xFFFFFFFF);
-            int ly = y + 18;
-            int maxY = y + h + rightScrollY;
-            for (int i = 0; i < playlistSongs.size() && ly < maxY; i++)
+            g.drawString(this.font, Component.literal("< 返回"), cx2 + 8, 12, 0xFF4FC3F7, false);
+            g.drawString(this.font, Component.literal(currentPlaylist.name + " (" + playlistSongs.size() + ")"), cx2 + 50, 12, 0xFFFFFFFF, false);
+            int listY = 36, listBot = this.height - CONTROL_H - 8;
+            double maxS = Math.max(0, playlistSongs.size() * ROW_H - (listBot - listY));
+            scroll = Math.max(0, Math.min(scroll, maxS));
+            int start = (int)(scroll / ROW_H);
+            for (int i = start; i < Math.min(playlistSongs.size(), start + (listBot - listY) / ROW_H + 1); i++)
             {
-                NeteaseSong s = playlistSongs.get(i);
-                boolean isCur = MusicPlayer.getInstance().getCurrentSong() != null
-                        && MusicPlayer.getInstance().getCurrentSong().id == s.id;
-                boolean hov = mx >= x+4 && mx <= x+w-8 && my >= ly && my < ly + 14;
-                if (hov) ModernUI.fillRound(g, x+4, ly, w-12, 14, 3, 0x20FFFFFF);
-                String prefix = isCur ? "▶ " : (i+1) + ". ";
-                g.drawString(this.font, Component.literal(prefix + trunc(s.name, 40)), x+8, ly, isCur ? 0xFF00FFFF : 0xFFDDDDDD, false);
-                g.drawString(this.font, Component.literal(trunc(s.getDisplayArtist(), 30)), x+8, ly + 7, 0xFF888888, false);
-                if (hov) g.drawString(this.font, Component.literal("[播放]"), x+w-30, ly, 0xFF00FFFF, false);
-                ly += 14;
+                int y = listY + i * ROW_H - (int)scroll;
+                drawSongRow(g, playlistSongs.get(i), y, cx2, cw);
             }
-            rightScrollMax = Math.max(0, playlistSongs.size() * 14 - h + 20);
             return;
         }
         if (playlists.isEmpty())
         {
-            g.drawCenteredString(this.font, Component.literal(NeteaseSession.getInstance().isLoggedIn() ? "加载中…" : "未登录"), x+w/2, y+h/2, 0xFFAAAAAA);
+            g.drawCenteredString(this.font, Component.literal(NeteaseSession.getInstance().isLoggedIn() ? "加载中..." : "未登录"), cx2 + cw / 2, this.height / 3, 0xFF888888);
             return;
         }
-        int ly = y + 2;
-        int maxY = y + h + rightScrollY;
-        for (int i = 0; i < playlists.size() && ly < maxY; i++)
+        int listY = 36, listBot = this.height - CONTROL_H - 8;
+        double maxS = Math.max(0, playlists.size() * 26 - (listBot - listY));
+        scroll = Math.max(0, Math.min(scroll, maxS));
+        int start = (int)(scroll / 26);
+        for (int i = start; i < Math.min(playlists.size(), start + (listBot - listY) / 26 + 1); i++)
         {
             NeteasePlaylist pl = playlists.get(i);
-            boolean hov = mx >= x+4 && mx <= x+w-8 && my >= ly && my < ly + 24;
-            if (hov) ModernUI.fillRound(g, x+4, ly, w-12, 24, 4, 0x20FFFFFF);
-            g.drawString(this.font, Component.literal(trunc(pl.name, 30)), x+8, ly + 2, 0xFFFFFFFF, false);
-            g.drawString(this.font, Component.literal(pl.trackCount + " 首" + (pl.creatorName != null && !pl.creatorName.isEmpty() ? " · " + pl.creatorName : "")), x+8, ly + 14, 0xFF888888, false);
-            ly += 24;
+            int y = listY + i * 26 - (int)scroll;
+            boolean hv = mouseX >= cx2 + 4 && mouseX <= this.width - 4 && mouseY >= y && mouseY <= y + 24;
+            if (hv) g.fill(cx2 + 4, y, this.width - 4, y + 24, 0xFF23262F);
+            g.drawString(this.font, Component.literal(trunc(pl.name, 30)), cx2 + 12, y + 4, 0xFFCCCCCC, false);
+            g.drawString(this.font, Component.literal(pl.trackCount + " 首" + (pl.creatorName != null && !pl.creatorName.isEmpty() ? " · " + pl.creatorName : "")), cx2 + 12, y + 15, 0xFF888888, false);
         }
-        rightScrollMax = Math.max(0, playlists.size() * 24 - h + 4);
     }
 
-    private void renderSearch(GuiGraphics g, int x, int y, int w, int h, int mx, int my)
+    // === 搜索页 ===
+    private void drawSearch(GuiGraphics g)
     {
-        // 搜索框在 init 中创建（y=20），这里渲染结果列表
-        int statusY = y + 24;
+        int cx2 = SIDEBAR_W, cw = this.width - SIDEBAR_W;
         if (!searchStatus.isEmpty())
-            g.drawString(this.font, Component.literal(searchStatus), x + 4, statusY, searchStatusColor, false);
-        if (searchResults.isEmpty()) { rightScrollMax = 0; return; }
-        int ly = statusY + 14;
-        int maxY = y + h + rightScrollY;  // ★ 允许渲染超出可见区域（scissor 会裁剪）
-        for (int i = 0; i < searchResults.size() && ly < maxY; i++)
+            g.drawString(this.font, Component.literal(searchStatus), cx2 + 12, 36, searchStatusColor, false);
+        if (searchResults.isEmpty()) return;
+        int listY = 52, listBot = this.height - CONTROL_H - 8;
+        double maxS = Math.max(0, searchResults.size() * ROW_H - (listBot - listY));
+        scroll = Math.max(0, Math.min(scroll, maxS));
+        int start = (int)(scroll / ROW_H);
+        for (int i = start; i < Math.min(searchResults.size(), start + (listBot - listY) / ROW_H + 1); i++)
         {
-            NeteaseSong s = searchResults.get(i);
-            boolean isCur = MusicPlayer.getInstance().getCurrentSong() != null
-                    && MusicPlayer.getInstance().getCurrentSong().id == s.id;
-            boolean hov = mx >= x+4 && mx <= x+w-8 && my >= ly && my < ly + 14;
-            if (hov) ModernUI.fillRound(g, x+4, ly, w-12, 14, 3, 0x20FFFFFF);
-            g.drawString(this.font, Component.literal((isCur ? "▶ " : (i+1) + ". ") + trunc(s.name, 40)), x+8, ly, isCur ? 0xFF00FFFF : 0xFFDDDDDD, false);
-            g.drawString(this.font, Component.literal(trunc(s.getDisplayArtist() + " · " + s.getDisplayDuration(), 40)), x+8, ly + 7, 0xFF888888, false);
-            if (hov) g.drawString(this.font, Component.literal("[▶下一首]"), x+w-40, ly, 0xFF00FFFF, false);
-            ly += 14;
+            int y = listY + i * ROW_H - (int)scroll;
+            drawSongRow(g, searchResults.get(i), y, cx2, cw);
         }
-        rightScrollMax = Math.max(0, searchResults.size() * 14 + 38 - h);
     }
 
-    private void renderQueue(GuiGraphics g, int x, int y, int w, int h, MusicPlayer p, int mx, int my)
+    // === 队列页 ===
+    private void drawQueue(GuiGraphics g)
     {
+        MusicPlayer p = MusicPlayer.getInstance();
         List<NeteaseSong> q = p.getQueue();
-        if (q.isEmpty()) { g.drawCenteredString(this.font, Component.literal("播放队列为空"), x+w/2, y+h/2, 0xFFAAAAAA); rightScrollMax = 0; return; }
-        g.drawString(this.font, Component.literal("播放队列 (" + q.size() + ") · 当前 " + (p.getQueueIndex()+1)), x+4, y+2, 0xFFFFFFFF, false);
-        int ly = y + 18;
-        int maxY = y + h + rightScrollY;
-        for (int i = 0; i < q.size() && ly < maxY; i++)
+        int cx2 = SIDEBAR_W, cw = this.width - SIDEBAR_W;
+        if (q.isEmpty()) { g.drawCenteredString(this.font, Component.literal("播放队列为空"), cx2 + cw / 2, this.height / 3, 0xFF888888); return; }
+        g.drawString(this.font, Component.literal("播放队列 (" + q.size() + ") · 当前 " + (p.getQueueIndex() + 1)), cx2 + 12, 12, 0xFFCCCCCC, false);
+        int listY = 36, listBot = this.height - CONTROL_H - 8;
+        double maxS = Math.max(0, q.size() * ROW_H - (listBot - listY));
+        scroll = Math.max(0, Math.min(scroll, maxS));
+        int start = (int)(scroll / ROW_H);
+        for (int i = start; i < Math.min(q.size(), start + (listBot - listY) / ROW_H + 1); i++)
         {
-            NeteaseSong s = q.get(i);
-            boolean isCur = i == p.getQueueIndex();
-            boolean hov = mx >= x+4 && mx <= x+w-8 && my >= ly && my < ly + 14;
-            if (isCur) ModernUI.fillRound(g, x+4, ly, w-12, 14, 3, 0x30FFFFFF);
-            else if (hov) ModernUI.fillRound(g, x+4, ly, w-12, 14, 3, 0x20FFFFFF);
-            g.drawString(this.font, Component.literal((isCur ? "▶ " : (i+1) + ". ") + trunc(s.name, 40)), x+8, ly, isCur ? 0xFF00FFFF : 0xFFDDDDDD, false);
-            g.drawString(this.font, Component.literal(trunc(s.getDisplayArtist(), 30)), x+8, ly + 7, 0xFF888888, false);
-            ly += 14;
+            int y = listY + i * ROW_H - (int)scroll;
+            drawSongRow(g, q.get(i), y, cx2, cw);
         }
-        rightScrollMax = Math.max(0, q.size() * 14 + 18 - h);
     }
 
-    private void renderSettings(GuiGraphics g, int x, int y, int w, int h, int accent, int text, int dim)
+    // === 设置页 ===
+    private void drawSettings(GuiGraphics g)
     {
-        int ly = y + 4;
-        // HUD 设置
-        g.drawString(this.font, Component.literal("─── HUD ───"), x + w/2 - 30, ly, accent, false); ly += 14;
+        int x = SIDEBAR_W + 12, y = 36;
+        int cw = this.width - SIDEBAR_W - 24;
+        int accent = 0xFF4FC3F7, text = 0xFFFFFFFF, dim = 0xFF888888;
+
+        g.drawString(this.font, Component.literal("─── HUD ───"), x, y, accent, false); y += 20;
         String[][] items = {
             {"启用HUD", ZephyrConfig.HUD_ENABLED.get() ? "ON" : "OFF"},
             {"显示封面", ZephyrConfig.HUD_SHOW_COVER.get() ? "ON" : "OFF"},
@@ -475,87 +322,182 @@ public class PlayerScreen extends Screen
         };
         for (String[] item : items)
         {
-            g.drawString(this.font, Component.literal(item[0]), x + 8, ly, text, false);
+            boolean hv = mouseX >= x && mouseX <= x + cw && mouseY >= y - 2 && mouseY <= y + 16;
+            if (hv) g.fill(x - 4, y - 2, x + cw, y + 16, 0xFF23262F);
+            g.drawString(this.font, Component.literal(item[0]), x, y, text, false);
             int vw = this.font.width(item[1]);
-            ModernUI.fillRound(g, x + w - vw - 16, ly - 1, vw + 10, 12, 3, 0x40444444);
-            g.drawString(this.font, Component.literal(item[1]), x + w - vw - 11, ly, accent, false);
-            ly += 14;
+            g.fill(x + cw - vw - 12, y - 1, x + cw, y + 12, 0xFF2E3240);
+            g.drawString(this.font, Component.literal(item[1]), x + cw - vw - 6, y, accent, false);
+            y += 18;
         }
-        ly += 6;
-        g.drawString(this.font, Component.literal("─── 歌词 ───"), x + w/2 - 30, ly, accent, false); ly += 14;
-        String[][] lyricItems = {
-            {"卡拉OK", ZephyrConfig.LYRIC_KARAOKE.get() ? "ON" : "OFF"},
-            {"歌词模式", ZephyrConfig.LYRIC_MODE.get()},
-        };
-        for (String[] item : lyricItems)
+        y += 8;
+        g.drawString(this.font, Component.literal("─── 歌词 ───"), x, y, accent, false); y += 20;
+        String[][] litems = {{"卡拉OK", ZephyrConfig.LYRIC_KARAOKE.get() ? "ON" : "OFF"}, {"歌词模式", ZephyrConfig.LYRIC_MODE.get()}};
+        for (String[] item : litems)
         {
-            g.drawString(this.font, Component.literal(item[0]), x + 8, ly, text, false);
-            g.drawString(this.font, Component.literal(item[1]), x + w - 40, ly, accent, false);
-            ly += 14;
+            boolean hv = mouseX >= x && mouseX <= x + cw && mouseY >= y - 2 && mouseY <= y + 16;
+            if (hv) g.fill(x - 4, y - 2, x + cw, y + 16, 0xFF23262F);
+            g.drawString(this.font, Component.literal(item[0]), x, y, text, false);
+            g.drawString(this.font, Component.literal(item[1]), x + cw - 60, y, accent, false);
+            y += 18;
         }
-        ly += 6;
-        g.drawString(this.font, Component.literal("─── 通用 ───"), x + w/2 - 30, ly, accent, false); ly += 14;
-        g.drawString(this.font, Component.literal("音质"), x + 8, ly, text, false);
-        g.drawString(this.font, Component.literal(ZephyrConfig.DEFAULT_QUALITY.get()), x + w - 40, ly, accent, false); ly += 14;
-        g.drawString(this.font, Component.literal("打卡"), x + 8, ly, text, false);
-        g.drawString(this.font, Component.literal(ZephyrConfig.SCROBBLE_ENABLED.get() ? "ON" : "OFF"), x + w - 40, ly, accent, false); ly += 14;
-        rightScrollMax = Math.max(0, ly - y - h + 4);
+        y += 8;
+        g.drawString(this.font, Component.literal("─── 通用 ───"), x, y, accent, false); y += 20;
+        g.drawString(this.font, Component.literal("音质"), x, y, text, false);
+        g.drawString(this.font, Component.literal(ZephyrConfig.DEFAULT_QUALITY.get()), x + cw - 60, y, accent, false); y += 18;
+        g.drawString(this.font, Component.literal("打卡"), x, y, text, false);
+        g.drawString(this.font, Component.literal(ZephyrConfig.SCROBBLE_ENABLED.get() ? "ON" : "OFF"), x + cw - 60, y, accent, false);
     }
 
-    private void renderAccount(GuiGraphics g, int x, int y, int w, int h, int accent, int text, int dim)
+    // === 账号页 ===
+    private void drawAccount(GuiGraphics g)
     {
         NeteaseUser u = userDetail != null ? userDetail : NeteaseSession.getInstance().getCurrentUser();
-        if (u == null) { g.drawCenteredString(this.font, Component.literal("未登录"), x+w/2, y+h/2, 0xFFFF5555); return; }
-        int cy = y + 10;
-        int avSize = 56;
-        int avX = x + (w - avSize) / 2;
-        renderCover(g, u.avatarUrl, avX, cy, avSize);
-        cy += avSize + 6;
-        g.drawCenteredString(this.font, Component.literal(u.nickname), x+w/2, cy, text); cy += 14;
-        if (u.vipType > 0) { g.drawCenteredString(this.font, Component.literal("VIP"), x+w/2, cy, 0xFFFFAA00); cy += 12; }
-        cy += 6;
-        int ix = x + 20;
-        g.drawString(this.font, Component.literal("🆔 ID: " + u.userId), ix, cy, dim, false); cy += 14;
-        g.drawString(this.font, Component.literal("🎵 听歌: " + (u.listenSongs > 0 ? u.listenSongs + "首" : "未知")), ix, cy, accent, false); cy += 14;
-        g.drawString(this.font, Component.literal("📊 等级: " + (u.level > 0 ? "Lv." + u.level : "未知")), ix, cy, accent, false); cy += 14;
-        g.drawString(this.font, Component.literal("📅 注册: " + fmtDate(u.createTime)), ix, cy, dim, false); cy += 14;
-        g.drawString(this.font, Component.literal("📍 地区: " + RegionCodeMapper.formatLocation(u.province, u.city)), ix, cy, dim, false); cy += 14;
-        g.drawString(this.font, Component.literal("⚧ 性别: " + fmtGender(u.gender)), ix, cy, dim, false); cy += 14;
-        if (u.signature != null && !u.signature.isEmpty())
-        { g.drawString(this.font, Component.literal("「" + trunc(u.signature, 40) + "」"), ix, cy, dim, false); cy += 14; }
-        cy += 10;
+        int cx2 = SIDEBAR_W + (this.width - SIDEBAR_W) / 2;
+        int y = 36;
+        if (u == null) { g.drawCenteredString(this.font, Component.literal("未登录"), cx2, y + 40, 0xFFFF6666); return; }
+        // 头像
+        int avSz = 56, avX = cx2 - avSz / 2;
+        renderCover(g, u.avatarUrl, avX, y, avSz);
+        y += avSz + 8;
+        g.drawCenteredString(this.font, Component.literal(u.nickname), cx2, y, 0xFFFFFFFF); y += 14;
+        int ix = SIDEBAR_W + 20;
+        g.drawString(this.font, Component.literal("🆔 ID: " + u.userId), ix, y, 0xFF888888, false); y += 16;
+        g.drawString(this.font, Component.literal("🎵 听歌: " + (u.listenSongs > 0 ? u.listenSongs + "首" : "未知")), ix, y, 0xFF4FC3F7, false); y += 16;
+        g.drawString(this.font, Component.literal("📊 等级: " + (u.level > 0 ? "Lv." + u.level : "未知")), ix, y, 0xFF4FC3F7, false); y += 16;
+        g.drawString(this.font, Component.literal("📅 注册: " + fmtDate(u.createTime)), ix, y, 0xFF888888, false); y += 16;
+        g.drawString(this.font, Component.literal("📍 地区: " + RegionCodeMapper.formatLocation(u.province, u.city)), ix, y, 0xFF888888, false); y += 16;
+        g.drawString(this.font, Component.literal("⚧ 性别: " + (u.gender == 1 ? "男" : u.gender == 2 ? "女" : "保密")), ix, y, 0xFF888888, false); y += 24;
         // 退出登录按钮
-        boolean hov = Minecraft.getInstance().mouseHandler.xpos() / 2.0 >= ix && Minecraft.getInstance().mouseHandler.xpos() / 2.0 <= ix + 80
-                && Minecraft.getInstance().mouseHandler.ypos() / 2.0 >= cy && Minecraft.getInstance().mouseHandler.ypos() / 2.0 <= cy + 16;
-        ModernUI.fillRound(g, ix, cy, 80, 16, 4, hov ? 0x80FF5555 : 0x40FF5555);
-        g.drawCenteredString(this.font, Component.literal("退出登录"), ix + 40, cy + 4, 0xFFFF5555);
-        rightScrollMax = Math.max(0, cy + 20 - y - h + 4);
+        int btnW = 80, btnX = cx2 - btnW / 2;
+        boolean hv = mouseX >= btnX && mouseX <= btnX + btnW && mouseY >= y && mouseY <= y + 18;
+        g.fill(btnX, y, btnX + btnW, y + 18, hv ? 0x80FF6666 : 0x40FF6666);
+        g.drawCenteredString(this.font, Component.literal("退出登录"), cx2, y + 5, 0xFFFF6666);
+    }
+
+    // === 歌曲行（带封面缩略图）===
+    private void drawSongRow(GuiGraphics g, NeteaseSong song, int y, int contentX, int contentW)
+    {
+        if (y < 8 || y > this.height - CONTROL_H - 8) return;
+        boolean hv = mouseX >= contentX + 4 && mouseX <= this.width - 4 && mouseY >= y && mouseY <= y + ROW_H;
+        if (hv) g.fill(contentX + 4, y, this.width - 4, y + ROW_H, 0xFF23262F);
+        // 封面缩略图
+        renderCover(g, song.picUrl, contentX + 8, y + 2, 32);
+        // 标题
+        String title = trunc(song.name, 40);
+        g.drawString(this.font, Component.literal(title), contentX + 48, y + 4, 0xFFFFFFFF, false);
+        // 副标题
+        String sub = trunc(song.getDisplayArtist() + " · " + song.getDisplayDuration(), 40);
+        g.drawString(this.font, Component.literal(sub), contentX + 48, y + 18, 0xFF999999, false);
+        // 当前播放标记
+        NeteaseSong cur = MusicPlayer.getInstance().getCurrentSong();
+        if (cur != null && cur.id == song.id)
+            g.drawString(this.font, Component.literal("▶"), contentX + 48 + this.font.width(title) + 6, y + 4, 0xFF4FC3F7, false);
+    }
+
+    // === 底部控制条 ===
+    private void drawControlBar(GuiGraphics g)
+    {
+        MusicPlayer p = MusicPlayer.getInstance();
+        NeteaseSong song = p.getCurrentSong();
+        int y = this.height - CONTROL_H;
+        int cx2 = SIDEBAR_W, cw = this.width - SIDEBAR_W;
+        // 背景
+        g.fill(cx2, y, this.width, this.height, 0xFF17181D);
+        g.fill(cx2, y, this.width, y + 1, 0xFF2E3240);
+
+        // 进度条
+        double pos = p.getPositionSec();
+        double total = song != null && song.duration > 0 ? song.duration / 1000.0 : 0;
+        double prog = total > 0 ? Math.min(1, pos / total) : 0;
+        int barX = cx2 + 20, barW = cw - 40, barY = y + 6;
+        progBarX = barX; progBarY = barY; progBarW = barW;
+        g.fill(barX, barY, barX + barW, barY + 4, 0xFF444444);
+        int filled = (int)(barW * prog);
+        g.fill(barX, barY, barX + filled, barY + 4, 0xFF4FC3F7);
+        // 滑块
+        g.fill(barX + filled - 1, barY - 2, barX + filled + 3, barY + 6, 0xFF4FC3F7);
+        // 时间
+        String time = fmtTime(pos) + " / " + fmtTime(total);
+        g.drawString(this.font, Component.literal(time), barX + barW - this.font.width(time), barY + 6, 0xFF999999, false);
+
+        // 按钮行
+        int by = y + 22;
+        drawCtrlBtn(g, "⏮", cx2 + 20, by, () -> p.prev());
+        drawCtrlBtn(g, p.isPaused() ? "▶" : "⏸", cx2 + 56, by, () -> { if (p.isPlaying()) { if (p.isPaused()) p.resume(); else p.pause(); } });
+        drawCtrlBtn(g, "⏭", cx2 + 92, by, () -> p.next());
+        drawCtrlBtn(g, p.isLoopMode() ? "🔁" : "➡", cx2 + 128, by, () -> p.setLoopMode(!p.isLoopMode()));
+
+        // 音量
+        float vol = p.getVolume();
+        drawCtrlBtn(g, "−", cx2 + 180, by, () -> p.setVolume(vol - 0.1f));
+        volBarX = cx2 + 210; volBarY = by + 9; volBarW = 80;
+        g.fill(volBarX, volBarY, volBarX + volBarW, volBarY + 4, 0xFF444444);
+        g.fill(volBarX, volBarY, volBarX + (int)(volBarW * vol), volBarY + 4, 0xFF4FC3F7);
+        drawCtrlBtn(g, "+", cx2 + 296, by, () -> p.setVolume(vol + 0.1f));
+        g.drawString(this.font, Component.literal(Math.round(vol * 100) + "%"), cx2 + 260, by + 8, 0xFFAAAAAA, false);
+
+        // 歌曲名
+        String now = song != null ? trunc(song.name + " - " + song.getDisplayArtist(), 50) : "未在播放";
+        g.drawString(this.font, Component.literal(now), cx2 + 340, by + 8, 0xFFCCCCCC, false);
+    }
+
+    private void drawCtrlBtn(GuiGraphics g, String label, int x, int y, Runnable action)
+    {
+        boolean hv = mouseX >= x && mouseX <= x + 30 && mouseY >= y && mouseY <= y + 20;
+        if (hv) g.fill(x, y, x + 30, y + 20, 0xFF2E3240);
+        g.drawCenteredString(this.font, Component.literal(label), x + 15, y + 6, 0xFFDDDDDD);
     }
 
     // === 鼠标交互 ===
     @Override
     public boolean mouseClicked(double mx, double my, int btn)
     {
+        // 侧边栏 Tab
+        if (mx < SIDEBAR_W)
+        {
+            int ty = 34;
+            Tab[] tabs = Tab.values();
+            for (int i = 0; i < tabs.length; i++)
+            {
+                if (my >= ty && my <= ty + 30) { switchTab(tabs[i]); return true; }
+                ty += 34;
+            }
+            return super.mouseClicked(mx, my, btn);
+        }
+
         // 进度条
-        if (mx >= progX-4 && mx <= progX+progW+4 && my >= progY-4 && my <= progY+progH+4)
+        if (mx >= progBarX - 4 && mx <= progBarX + progBarW + 4 && my >= progBarY - 4 && my <= progBarY + 8)
         { progDrag = true; seekMouse(mx); return true; }
         // 音量条
-        if (mx >= volX-14 && mx <= volX+volW+20 && my >= volY-4 && my <= volY+volH+4)
+        if (mx >= volBarX - 4 && mx <= volBarX + volBarW + 4 && my >= volBarY - 4 && my <= volBarY + 8)
         { volDrag = true; volMouse(mx); return true; }
-        // 右侧区域点击
-        int rx = 8 + LEFT_W + 8, ry = 22, rw = this.width - rx - 8, rh = this.height - 56;
-        if (mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh)
+
+        // 底部控制按钮
+        int by = this.height - CONTROL_H + 22;
+        if (my >= by && my <= by + 20)
         {
-            int adjMy = (int)(my - ry + rightScrollY);
-            int adjX = (int)(mx - rx);
+            int cx2 = SIDEBAR_W;
+            if (mx >= cx2 + 20 && mx <= cx2 + 50) { MusicPlayer.getInstance().prev(); return true; }
+            if (mx >= cx2 + 56 && mx <= cx2 + 86) { MusicPlayer p = MusicPlayer.getInstance(); if (p.isPlaying()) { if (p.isPaused()) p.resume(); else p.pause(); } return true; }
+            if (mx >= cx2 + 92 && mx <= cx2 + 122) { MusicPlayer.getInstance().next(); return true; }
+            if (mx >= cx2 + 128 && mx <= cx2 + 158) { MusicPlayer p = MusicPlayer.getInstance(); p.setLoopMode(!p.isLoopMode()); return true; }
+            if (mx >= cx2 + 180 && mx <= cx2 + 210) { MusicPlayer p = MusicPlayer.getInstance(); p.setVolume(p.getVolume() - 0.1f); return true; }
+            if (mx >= cx2 + 296 && mx <= cx2 + 326) { MusicPlayer p = MusicPlayer.getInstance(); p.setVolume(p.getVolume() + 0.1f); return true; }
+        }
+
+        // 右侧内容区点击
+        int contentX = SIDEBAR_W;
+        if (mx >= contentX && my >= 36 && my < this.height - CONTROL_H - 4)
+        {
             switch (currentTab)
             {
                 case PLAYLIST:
                     if (showPlaylistSongs)
                     {
-                        // 返回按钮
-                        if (adjX < 80 && adjMy < 14) { showPlaylistSongs = false; playlistSongs.clear(); return true; }
-                        int idx = (adjMy - 18) / 14;
+                        if (mx < contentX + 50 && my < 36) { showPlaylistSongs = false; playlistSongs.clear(); return true; }
+                        int listY = 36, rowH = ROW_H;
+                        int idx = (int)((my - listY + scroll) / rowH);
                         if (idx >= 0 && idx < playlistSongs.size())
                         { MusicPlayer.getInstance().setQueue(playlistSongs, idx);
                           MusicPlayer.getInstance().setCurrentSourcePlaylistId(currentPlaylist.id);
@@ -563,35 +505,38 @@ public class PlayerScreen extends Screen
                     }
                     else
                     {
-                        int pidx = adjMy / 24;
-                        if (pidx >= 0 && pidx < playlists.size()) { openPlaylist(playlists.get(pidx)); return true; }
+                        int listY = 36, rowH = 26;
+                        int idx = (int)((my - listY + scroll) / rowH);
+                        if (idx >= 0 && idx < playlists.size()) { openPlaylist(playlists.get(idx)); return true; }
                     }
                     break;
                 case SEARCH:
-                    int sidx = (adjMy - 38) / 14;
+                    int listY2 = 52, rowH2 = ROW_H;
+                    int sidx = (int)((my - listY2 + scroll) / rowH2);
                     if (sidx >= 0 && sidx < searchResults.size())
                     { MusicPlayer.getInstance().setQueue(searchResults, sidx);
                       MusicPlayer.getInstance().playSong(searchResults.get(sidx));
                       searchStatus = "正在播放: " + searchResults.get(sidx).name;
-                      searchStatusColor = 0xFF00FFFF; return true; }
+                      searchStatusColor = 0xFF4FC3F7; return true; }
                     break;
                 case QUEUE:
-                    int qidx = (adjMy - 18) / 14;
+                    int qListY = 36, qRowH = ROW_H;
+                    int qidx = (int)((my - qListY + scroll) / qRowH);
                     if (qidx >= 0 && qidx < MusicPlayer.getInstance().getQueue().size())
                     { MusicPlayer.getInstance().jumpTo(qidx); return true; }
                     break;
                 case SETTINGS:
-                    // 点击切换设置项
-                    toggleSetting(adjMy, adjX, rx, rw);
+                    toggleSetting((int)(my - 36 + scroll), (int)(mx - contentX));
                     break;
                 case ACCOUNT:
-                    // 退出登录
-                    int btnY = (int)(my - ry + rightScrollY);
                     NeteaseUser u = userDetail;
-                    if (u != null && adjX >= 20 && adjX <= 100 && btnY >= 0)
+                    if (u != null)
                     {
-                        // 检查是否点击了退出按钮（需要计算实际位置）
-                        // 简化：点击底部区域退出
+                        // 退出登录按钮
+                        int cx2 = SIDEBAR_W + (this.width - SIDEBAR_W) / 2;
+                        int btnY = 36 + 56 + 8 + 14 + 16 * 7;
+                        if (mx >= cx2 - 40 && mx <= cx2 + 40 && my >= btnY && my <= btnY + 18)
+                        { NeteaseSession.getInstance().logout().thenAccept(v -> Minecraft.getInstance().execute(() -> Minecraft.getInstance().setScreen(new LoginScreen()))); return true; }
                     }
                     break;
             }
@@ -599,31 +544,33 @@ public class PlayerScreen extends Screen
         return super.mouseClicked(mx, my, btn);
     }
 
-    private void toggleSetting(int adjMy, int adjX, int rx, int rw)
+    private void toggleSetting(int adjY, int adjX)
     {
-        // ★ 设置项从 y+4+14 开始（标题占 14px），每项 14px 高
-        int startY = 4 + 14;  // 标题行 14px
-        int itemH = 14;
-        if (adjMy >= startY && adjMy < startY + itemH * 10)
+        int y = 20; // 跳过标题
+        int[] configIdx = {0,1,2,3,4,5,6,7,8,9};
+        for (int i = 0; i < 10; i++)
         {
-            int idx = (adjMy - startY) / itemH;
-            // 点击右侧值区域才切换
-            if (adjX > rw / 2)
+            if (adjY >= y && adjY < y + 18)
             {
-                switch (idx)
+                if (adjX > 200) // 右半部分点击
                 {
-                    case 0: ZephyrConfig.HUD_ENABLED.set(!ZephyrConfig.HUD_ENABLED.get()); break;
-                    case 1: ZephyrConfig.HUD_SHOW_COVER.set(!ZephyrConfig.HUD_SHOW_COVER.get()); break;
-                    case 2: ZephyrConfig.HUD_SHOW_PROGRESS_BAR.set(!ZephyrConfig.HUD_SHOW_PROGRESS_BAR.get()); break;
-                    case 3: ZephyrConfig.HUD_SHOW_LYRICS.set(!ZephyrConfig.HUD_SHOW_LYRICS.get()); break;
-                    case 4: ZephyrConfig.HUD_PAUSE_ON_MENU.set(!ZephyrConfig.HUD_PAUSE_ON_MENU.get()); break;
-                    case 5: ZephyrConfig.HUD_COMPACT.set(!ZephyrConfig.HUD_COMPACT.get()); break;
-                    case 6: ZephyrConfig.HUD_PANEL_WIDTH.set(Math.min(600, ZephyrConfig.HUD_PANEL_WIDTH.get() + 20)); break;
-                    case 7: ZephyrConfig.HUD_COVER_SIZE.set(Math.min(256, ZephyrConfig.HUD_COVER_SIZE.get() + 16)); break;
-                    case 8: ZephyrConfig.HUD_LYRICS_LINES.set(Math.min(12, ZephyrConfig.HUD_LYRICS_LINES.get() + 1)); break;
-                    case 9: ZephyrConfig.HUD_VOLUME.set(Math.min(1.0, ZephyrConfig.HUD_VOLUME.get() + 0.1)); break;
+                    switch (i)
+                    {
+                        case 0: ZephyrConfig.HUD_ENABLED.set(!ZephyrConfig.HUD_ENABLED.get()); break;
+                        case 1: ZephyrConfig.HUD_SHOW_COVER.set(!ZephyrConfig.HUD_SHOW_COVER.get()); break;
+                        case 2: ZephyrConfig.HUD_SHOW_PROGRESS_BAR.set(!ZephyrConfig.HUD_SHOW_PROGRESS_BAR.get()); break;
+                        case 3: ZephyrConfig.HUD_SHOW_LYRICS.set(!ZephyrConfig.HUD_SHOW_LYRICS.get()); break;
+                        case 4: ZephyrConfig.HUD_PAUSE_ON_MENU.set(!ZephyrConfig.HUD_PAUSE_ON_MENU.get()); break;
+                        case 5: ZephyrConfig.HUD_COMPACT.set(!ZephyrConfig.HUD_COMPACT.get()); break;
+                        case 6: ZephyrConfig.HUD_PANEL_WIDTH.set(Math.min(600, ZephyrConfig.HUD_PANEL_WIDTH.get() + 20)); break;
+                        case 7: ZephyrConfig.HUD_COVER_SIZE.set(Math.min(256, ZephyrConfig.HUD_COVER_SIZE.get() + 16)); break;
+                        case 8: ZephyrConfig.HUD_LYRICS_LINES.set(Math.min(12, ZephyrConfig.HUD_LYRICS_LINES.get() + 1)); break;
+                        case 9: ZephyrConfig.HUD_VOLUME.set(Math.min(1.0, ZephyrConfig.HUD_VOLUME.get() + 0.1)); break;
+                    }
                 }
+                return;
             }
+            y += 18;
         }
     }
 
@@ -646,40 +593,33 @@ public class PlayerScreen extends Screen
     @Override
     public boolean mouseScrolled(double mx, double my, double delta)
     {
-        // 音量条附近滚轮
-        if (mx >= volX - 14 && mx <= volX + volW + 20)
-        { float v = MusicPlayer.getInstance().getVolume() + (delta > 0 ? 0.05f : -0.05f);
-          MusicPlayer.getInstance().setVolume(v); return true; }
-        // 右侧区域滚轮
-        int rx = 8 + LEFT_W + 8;
-        if (mx >= rx && mx < this.width - 8)
+        if (mx >= SIDEBAR_W)
         {
-            rightScrollY -= (int)(delta * 20);
-            rightScrollY = Math.max(0, Math.min(rightScrollMax, rightScrollY));
+            scroll -= delta * 30;
+            scroll = Math.max(0, scroll);
             return true;
         }
         return super.mouseScrolled(mx, my, delta);
     }
 
-    private void seekMouse(double mx) { MusicPlayer p = MusicPlayer.getInstance(); NeteaseSong s = p.getCurrentSong();
-        if (s == null || s.duration <= 0) return; double r = Math.max(0, Math.min(1, (mx - progX) / progW));
-        p.seekTo(r * (s.duration / 1000.0)); }
-    private void volMouse(double mx) { double r = Math.max(0, Math.min(1, (mx - volX) / volW));
-        MusicPlayer.getInstance().setVolume((float)r); }
-    private void renderKaraoke(GuiGraphics g, LyricLine line, int cx, int y, int maxW, double pos)
+    private void seekMouse(double mx)
     {
-        int played = ZephyrConfig.LYRIC_WORD_PLAYED_COLOR.get(), cur = ZephyrConfig.LYRIC_WORD_CURRENT_COLOR.get(), unplayed = ZephyrConfig.LYRIC_WORD_UNPLAYED_COLOR.get();
-        StringBuilder sb = new StringBuilder(); for (LyricWord w : line.words) sb.append(w.text);
-        String text = sb.toString(); if (this.font.width(text) > maxW) text = trunc(text, 55);
-        int tw = this.font.width(text), sx = cx - tw / 2, cx2 = sx;
-        for (LyricWord w : line.words) { if (w.text.isEmpty()) continue; String wt = w.text;
-            int ww = this.font.width(wt); if (cx2 + ww > sx + maxW) break;
-            int color = w.isFinished(pos) ? played : (w.isPlayingAt(pos) ? cur : unplayed);
-            g.drawString(this.font, Component.literal(wt), cx2, y, color, false); cx2 += ww; }
+        MusicPlayer p = MusicPlayer.getInstance();
+        NeteaseSong s = p.getCurrentSong();
+        if (s == null || s.duration <= 0) return;
+        double r = Math.max(0, Math.min(1, (mx - progBarX) / progBarW));
+        p.seekTo(r * (s.duration / 1000.0));
     }
+    private void volMouse(double mx)
+    {
+        double r = Math.max(0, Math.min(1, (mx - volBarX) / volBarW));
+        MusicPlayer.getInstance().setVolume((float)r);
+    }
+
+    // === 工具方法 ===
     private void renderCover(GuiGraphics g, String url, int x, int y, int sz)
     {
-        if (url == null || url.isEmpty()) { return; }
+        if (url == null || url.isEmpty()) return;
         ResourceLocation tid = CoverTextureManager.getInstance().getCover(url, null);
         if (tid != null)
         {
@@ -690,12 +630,23 @@ public class PlayerScreen extends Screen
             RenderSystem.disableBlend();
         }
     }
-    private int findCur(List<LyricLine> lyrics, double pos) { int idx = -1;
-        for (int i = 0; i < lyrics.size(); i++) { if (lyrics.get(i).time <= pos) idx = i; else break; } return idx; }
-    private String fmtTime(double s) { if (s < 0) s = 0; int t = (int)s; return String.format("%d:%02d", t/60, t%60); }
-    private String fmtDate(long ms) { if (ms <= 0) return "未知";
-        try { return new java.text.SimpleDateFormat("yyyy-MM-dd").format(new java.util.Date(ms)); } catch (Exception e) { return "未知"; } }
-    private String fmtGender(int g) { return g == 1 ? "男" : g == 2 ? "女" : "保密"; }
-    private String trunc(String s, int m) { if (s == null) return ""; if (s.length() <= m) return s; return s.substring(0, m-1) + "…"; }
+    private void renderKaraoke(GuiGraphics g, LyricLine line, int cx, int y, int maxW, double pos)
+    {
+        int played = ZephyrConfig.LYRIC_WORD_PLAYED_COLOR.get(), cur2 = ZephyrConfig.LYRIC_WORD_CURRENT_COLOR.get(), unplayed = ZephyrConfig.LYRIC_WORD_UNPLAYED_COLOR.get();
+        StringBuilder sb = new StringBuilder(); for (LyricWord w : line.words) sb.append(w.text);
+        String text = sb.toString();
+        int tw = this.font.width(text), sx = cx - tw / 2, cx2 = sx;
+        for (LyricWord w : line.words)
+        {
+            if (w.text.isEmpty()) continue;
+            String wt = w.text; int ww = this.font.width(wt); if (cx2 + ww > sx + maxW) break;
+            int color = w.isFinished(pos) ? played : (w.isPlayingAt(pos) ? cur2 : unplayed);
+            g.drawString(this.font, Component.literal(wt), cx2, y, color, false); cx2 += ww;
+        }
+    }
+    private int findCur(List<LyricLine> lyrics, double pos) { int idx = -1; for (int i = 0; i < lyrics.size(); i++) { if (lyrics.get(i).time <= pos) idx = i; else break; } return idx; }
+    private String fmtTime(double s) { if (s < 0) s = 0; int t = (int)s; return String.format("%d:%02d", t / 60, t % 60); }
+    private String fmtDate(long ms) { if (ms <= 0) return "未知"; try { return new java.text.SimpleDateFormat("yyyy-MM-dd").format(new java.util.Date(ms)); } catch (Exception e) { return "未知"; } }
+    private String trunc(String s, int m) { if (s == null) return ""; if (s.length() <= m) return s; return s.substring(0, m - 1) + "…"; }
     @Override public boolean isPauseScreen() { return false; }
 }
