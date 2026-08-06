@@ -2,12 +2,7 @@ package com.zephyr.music.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import com.zephyr.music.ZephyrMusic;
-import com.zephyr.music.client.audio.MusicPlayer;
-import com.zephyr.music.client.gui.screen.LoginScreen;
 import com.zephyr.music.client.gui.screen.PlayerScreen;
-import com.zephyr.music.client.gui.screen.PlaylistBrowserScreen;
-import com.zephyr.music.client.gui.screen.SearchScreen;
-import com.zephyr.music.client.gui.screen.SettingsScreen;
 import com.zephyr.music.client.hud.MusicHudOverlay;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -22,42 +17,19 @@ import net.minecraftforge.fml.common.Mod;
 import org.lwjgl.glfw.GLFW;
 
 /**
- * 客户端事件总线 - 注册按键绑定与 GUI Overlay
+ * 客户端事件总线 - 只保留 F7 快捷键
  */
 @Mod.EventBusSubscriber(modid = ZephyrMusic.MODID, bus = Mod.EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
 public class ClientEventHandler
 {
-    public static KeyMapping KEY_OPEN_PLAYER;
-    public static KeyMapping KEY_OPEN_PLAYLIST;
-    public static KeyMapping KEY_OPEN_LOGIN;
-    public static KeyMapping KEY_OPEN_SEARCH;
-    public static KeyMapping KEY_OPEN_SETTINGS;
-    public static KeyMapping KEY_TOGGLE_PLAY;
-    public static KeyMapping KEY_NEXT;
-    public static KeyMapping KEY_PREV;
+    public static KeyMapping KEY_OPEN;
 
     @SubscribeEvent
     public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event)
     {
-        KEY_OPEN_PLAYER = new KeyMapping("key.zephyr.open_player", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F6, "key.categories.zephyr");
-        KEY_OPEN_PLAYLIST = new KeyMapping("key.zephyr.open_playlist", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F7, "key.categories.zephyr");
-        KEY_OPEN_LOGIN = new KeyMapping("key.zephyr.open_login", InputConstants.Type.KEYSYM, InputConstants.UNKNOWN.getValue(), "key.categories.zephyr");
-        KEY_OPEN_SEARCH = new KeyMapping("key.zephyr.open_search", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F10, "key.categories.zephyr");
-        KEY_OPEN_SETTINGS = new KeyMapping("key.zephyr.open_settings", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F11, "key.categories.zephyr");
-        KEY_TOGGLE_PLAY = new KeyMapping("key.zephyr.toggle_play", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F8, "key.categories.zephyr");
-        KEY_NEXT = new KeyMapping("key.zephyr.next", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F9, "key.categories.zephyr");
-        KEY_PREV = new KeyMapping("key.zephyr.prev", InputConstants.Type.KEYSYM, InputConstants.UNKNOWN.getValue(), "key.categories.zephyr");
-
-        event.register(KEY_OPEN_PLAYER);
-        event.register(KEY_OPEN_PLAYLIST);
-        event.register(KEY_OPEN_LOGIN);
-        event.register(KEY_OPEN_SEARCH);
-        event.register(KEY_OPEN_SETTINGS);
-        event.register(KEY_TOGGLE_PLAY);
-        event.register(KEY_NEXT);
-        event.register(KEY_PREV);
-
-        ZephyrMusic.LOGGER.info("[Zephyr] Key mappings registered");
+        KEY_OPEN = new KeyMapping("key.zephyr.open", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F7, "key.categories.zephyr");
+        event.register(KEY_OPEN);
+        ZephyrMusic.LOGGER.info("[Zephyr] Key mappings registered (F7 only)");
     }
 
     @SubscribeEvent
@@ -79,51 +51,15 @@ public class ClientEventHandler
         if (mc.player == null || mc.screen != null) return;
         if (event.getAction() != GLFW.GLFW_PRESS) return;
 
-        if (KEY_OPEN_PLAYER != null && KEY_OPEN_PLAYER.consumeClick())
+        if (KEY_OPEN != null && KEY_OPEN.consumeClick())
         {
-            mc.setScreen(new PlayerScreen());
-        }
-        else if (KEY_OPEN_PLAYLIST != null && KEY_OPEN_PLAYLIST.consumeClick())
-        {
-            // ★ F7: 打开播放器，如果有 cookie 切换到歌单 Tab，没有则切换到登录 Tab
+            // F7: 打开播放器，有 cookie 切换到歌单 Tab，没有则切换到登录 Tab
             PlayerScreen ps = new PlayerScreen();
             if (!com.zephyr.music.config.ZephyrConfig.COOKIE.get().isEmpty())
-            {
                 ps.setCurrentTab(PlayerScreen.Tab.PLAYLIST);
-            }
             else
-            {
                 ps.setCurrentTab(PlayerScreen.Tab.ACCOUNT);
-            }
             mc.setScreen(ps);
-        }
-        else if (KEY_OPEN_LOGIN != null && KEY_OPEN_LOGIN.consumeClick())
-        {
-            mc.setScreen(new LoginScreen());
-        }
-        else if (KEY_OPEN_SEARCH != null && KEY_OPEN_SEARCH.consumeClick())
-        {
-            mc.setScreen(new SearchScreen());
-        }
-        else if (KEY_OPEN_SETTINGS != null && KEY_OPEN_SETTINGS.consumeClick())
-        {
-            mc.setScreen(new SettingsScreen());
-        }
-        else if (KEY_TOGGLE_PLAY != null && KEY_TOGGLE_PLAY.consumeClick())
-        {
-            MusicPlayer p = MusicPlayer.getInstance();
-            if (p.isPlaying())
-            {
-                if (p.isPaused()) p.resume(); else p.pause();
-            }
-        }
-        else if (KEY_NEXT != null && KEY_NEXT.consumeClick())
-        {
-            MusicPlayer.getInstance().next();
-        }
-        else if (KEY_PREV != null && KEY_PREV.consumeClick())
-        {
-            MusicPlayer.getInstance().prev();
         }
     }
 }

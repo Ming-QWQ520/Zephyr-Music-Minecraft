@@ -50,7 +50,7 @@ public class PlaylistBrowserScreen extends Screen
                 .bounds(this.width - 116, 6, 18, 16).build());
         addRenderableWidget(Button.builder(Component.literal("账号"), b -> minecraft.setScreen(new LoginScreen()))
                 .bounds(this.width - 162, 6, 40, 16).build());
-        addRenderableWidget(Button.builder(Component.literal("搜索"), b -> minecraft.setScreen(new SearchScreen()))
+        addRenderableWidget(Button.builder(Component.literal("搜索"), b -> minecraft.setScreen(new PlayerScreen()))
                 .bounds(this.width - 208, 6, 40, 16).build());
         addRenderableWidget(Button.builder(Component.literal("播放器"), b -> minecraft.setScreen(new PlayerScreen()))
                 .bounds(this.width - 256, 6, 42, 16).build());

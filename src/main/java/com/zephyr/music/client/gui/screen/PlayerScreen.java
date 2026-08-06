@@ -15,8 +15,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FormattedCharSequence;
 import com.google.gson.JsonObject;
-
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * 全集成播放器界面 - 借鉴 InGameMusic 设计
@@ -54,8 +54,15 @@ public class PlayerScreen extends Screen
     private int progBarX, progBarY, progBarW;
     private int volBarX, volBarY, volBarW;
 
-    // 账号
+    // 账号/登录
     private NeteaseUser userDetail;
+    private int loginMode = 0; // 0=选择界面, 1=扫码, 2=手机, 3=邮箱
+    private String loginStatus = "";
+    private int loginStatusColor = 0xFFCCCCCC;
+    private EditBox phoneField, captchaField, countryCodeField, emailField, emailPwdField;
+    private String qrKey;
+    private java.util.Timer qrTimer;
+    private java.awt.image.BufferedImage qrImage;
 
     public PlayerScreen() { super(Component.literal("Zephyr Music")); }
 
@@ -80,6 +87,41 @@ public class PlayerScreen extends Screen
         progBarW = this.width - SIDEBAR_W - 40;
         progBarY = this.height - CONTROL_H + 6;
 
+        // 登录表单（ACCOUNT Tab 未登录时显示）
+        if (currentTab == Tab.ACCOUNT && !NeteaseSession.getInstance().isLoggedIn())
+        {
+            int fx = SIDEBAR_W + (this.width - SIDEBAR_W) / 2 - 100;
+            int fw = 200;
+            // 手机登录字段
+            countryCodeField = new EditBox(this.font, fx, 80, 40, 16, Component.literal("86"));
+            countryCodeField.setValue("86"); countryCodeField.setMaxLength(5);
+            phoneField = new EditBox(this.font, fx + 44, 80, 156, 16, Component.literal(""));
+            phoneField.setHint(Component.literal("手机号")); phoneField.setMaxLength(20);
+            captchaField = new EditBox(this.font, fx, 104, 120, 16, Component.literal(""));
+            captchaField.setHint(Component.literal("验证码")); captchaField.setMaxLength(8);
+            // 邮箱登录字段
+            emailField = new EditBox(this.font, fx, 80, fw, 16, Component.literal(""));
+            emailField.setHint(Component.literal("邮箱")); emailField.setMaxLength(64);
+            emailPwdField = new EditBox(this.font, fx, 104, fw, 16, Component.literal(""));
+            emailPwdField.setHint(Component.literal("密码")); emailPwdField.setMaxLength(64);
+            emailPwdField.setFormatter((s, i) -> net.minecraft.util.FormattedCharSequence.forward("*".repeat(s.length()), net.minecraft.network.chat.Style.EMPTY));
+
+            // 搜索框可见性
+            searchBox.visible = (currentTab == Tab.SEARCH);
+            // 登录字段初始不可见
+            countryCodeField.visible = false; phoneField.visible = false; captchaField.visible = false;
+            emailField.visible = false; emailPwdField.visible = false;
+            addRenderableWidget(countryCodeField); addRenderableWidget(phoneField); addRenderableWidget(captchaField);
+            addRenderableWidget(emailField); addRenderableWidget(emailPwdField);
+
+            // 登录按钮
+            int btnX = SIDEBAR_W + (this.width - SIDEBAR_W) / 2 - 40;
+            addRenderableWidget(Button.builder(Component.literal("登录"), b -> doLogin())
+                    .bounds(btnX, 128, 80, 18).build());
+            addRenderableWidget(Button.builder(Component.literal("← 返回"), b -> { loginMode = 0; clearWidgets(); init(); })
+                    .bounds(btnX, 152, 80, 16).build());
+        }
+
         // Tab 切换时加载数据
         if (currentTab == Tab.PLAYLIST && playlists.isEmpty() && NeteaseSession.getInstance().isLoggedIn())
             NeteaseSession.getInstance().fetchUserPlaylists().thenAccept(list -> { playlists.clear(); playlists.addAll(list); });
@@ -97,6 +139,108 @@ public class PlayerScreen extends Screen
 
     private void switchTab(Tab tab) { currentTab = tab; scroll = 0; clearWidgets(); init(); }
     public void setCurrentTab(Tab tab) { this.currentTab = tab; }
+
+    // === 登录 ===
+    private void doLogin()
+    {
+        if (loginMode == 1)
+        { startQrLogin(); }
+        else if (loginMode == 2)
+        {
+            String phone = phoneField.getValue().trim();
+            String ct = countryCodeField.getValue().trim();
+            String cap = captchaField.getValue().trim();
+            if (phone.isEmpty()) { loginStatus = "请输入手机号"; loginStatusColor = 0xFFFF6666; return; }
+            loginStatus = "登录中..."; loginStatusColor = 0xFFCCCCCC;
+            NeteaseSession.getInstance().getApi().loginCellphone(phone, "", cap, ct).thenAccept(resp -> {
+                int code = resp.has("code") ? resp.get("code").getAsInt() : -1;
+                Minecraft.getInstance().execute(() -> {
+                    if (code == 200 || code == 803) { NeteaseSession.getInstance().handleLoginResponse(resp); onLoginSuccess(); }
+                    else { loginStatus = "登录失败: " + code; loginStatusColor = 0xFFFF6666; }
+                });
+            });
+        }
+        else if (loginMode == 3)
+        {
+            String email = emailField.getValue().trim();
+            String pwd = emailPwdField.getValue();
+            if (email.isEmpty() || pwd.isEmpty()) { loginStatus = "请输入邮箱和密码"; loginStatusColor = 0xFFFF6666; return; }
+            loginStatus = "登录中..."; loginStatusColor = 0xFFCCCCCC;
+            NeteaseSession.getInstance().getApi().loginEmail(email, pwd).thenAccept(resp -> {
+                int code = resp.has("code") ? resp.get("code").getAsInt() : -1;
+                Minecraft.getInstance().execute(() -> {
+                    if (code == 200 || code == 803) { NeteaseSession.getInstance().handleLoginResponse(resp); onLoginSuccess(); }
+                    else { loginStatus = "登录失败: " + code; loginStatusColor = 0xFFFF6666; }
+                });
+            });
+        }
+    }
+
+    private void startQrLogin()
+    {
+        loginStatus = "生成二维码..."; loginStatusColor = 0xFFCCCCCC; qrImage = null; qrKey = null;
+        NeteaseSession.getInstance().getApi().qrKey().thenCompose(resp -> {
+            String key = null;
+            if (resp.has("data") && resp.getAsJsonObject("data").has("unikey")) key = resp.getAsJsonObject("data").get("unikey").getAsString();
+            else if (resp.has("unikey")) key = resp.get("unikey").getAsString();
+            if (key == null) { loginStatus = "获取二维码失败"; loginStatusColor = 0xFFFF6666; return CompletableFuture.completedFuture(new JsonObject()); }
+            qrKey = key;
+            return NeteaseSession.getInstance().getApi().qrCreate(key);
+        }).thenAccept(resp -> {
+            String qrimg = "";
+            if (resp.has("data") && resp.getAsJsonObject("data").has("qrimg")) qrimg = resp.getAsJsonObject("data").get("qrimg").getAsString();
+            else if (resp.has("qrimg")) qrimg = resp.get("qrimg").getAsString();
+            if (qrimg.startsWith("data:image")) qrimg = qrimg.substring(qrimg.indexOf(",") + 1);
+            try {
+                byte[] bytes = Base64.getDecoder().decode(qrimg);
+                qrImage = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(bytes));
+                loginStatus = "请使用网易云App扫码"; loginStatusColor = 0xFF4FC3F7;
+                startQrPolling();
+            } catch (Exception e) { loginStatus = "二维码解析失败"; loginStatusColor = 0xFFFF6666; }
+        });
+    }
+
+    private void startQrPolling()
+    {
+        if (qrTimer != null) qrTimer.cancel();
+        qrTimer = new java.util.Timer("Zephyr-QR", true);
+        qrTimer.scheduleAtFixedRate(new java.util.TimerTask() {
+            int count = 0;
+            public void run() {
+                if (qrKey == null || qrTimer == null) return;
+                if (++count > 60) { loginStatus = "二维码过期"; loginStatusColor = 0xFFFF6666; qrTimer.cancel(); qrTimer = null; return; }
+                NeteaseSession.getInstance().getApi().qrCheck(qrKey).thenAccept(resp -> {
+                    int code = resp.has("code") ? resp.get("code").getAsInt() : -1;
+                    if (code == 800) { loginStatus = "二维码过期"; loginStatusColor = 0xFFFF6666; if (qrTimer != null) { qrTimer.cancel(); qrTimer = null; } }
+                    else if (code == 801) { loginStatus = "等待扫码..."; loginStatusColor = 0xFFCCCCCC; }
+                    else if (code == 802) { loginStatus = "待确认..."; loginStatusColor = 0xFFFFFFAA; }
+                    else if (code == 803) {
+                        String cookie = NeteaseApi.extractCookie(resp);
+                        if (cookie != null && !cookie.isEmpty()) {
+                            com.zephyr.music.net.NeteaseHttpClient.getInstance().setCookie(cookie);
+                            if (qrTimer != null) { qrTimer.cancel(); qrTimer = null; }
+                            NeteaseSession.getInstance().refreshUser();
+                            Minecraft.getInstance().execute(() -> onLoginSuccess());
+                        }
+                    }
+                });
+            }
+        }, 1000, 1500);
+    }
+
+    private void onLoginSuccess()
+    {
+        loginMode = 0; loginStatus = ""; qrImage = null;
+        if (qrTimer != null) { qrTimer.cancel(); qrTimer = null; }
+        // 加载用户详情
+        NeteaseUser base = NeteaseSession.getInstance().getCurrentUser();
+        if (base != null && base.userId != 0)
+            NeteaseSession.getInstance().getApi().userDetail(base.userId).thenAccept(resp -> {
+                userDetail = NeteaseApi.parseUserDetail(resp, base);
+                if (userDetail != null) NeteaseSession.getInstance().updateCurrentUser(userDetail);
+            });
+        clearWidgets(); init();
+    }
 
     // === 搜索 ===
     private void doSearch()
@@ -363,52 +507,80 @@ public class PlayerScreen extends Screen
         int y = 36;
         int accent = 0xFF4FC3F7, text = 0xFFFFFFFF, dim = 0xFF888888;
 
-        // 未登录时显示登录选项
-        if (!NeteaseSession.getInstance().isLoggedIn())
+        // 已登录：显示用户信息
+        if (NeteaseSession.getInstance().isLoggedIn())
         {
-            g.drawCenteredString(this.font, Component.literal("网易云登录"), cx2, y, accent); y += 28;
-
-            // 扫码登录按钮
-            int btnW = 120, btnH = 20, btnX = cx2 - btnW / 2;
-            boolean hv1 = mouseX >= btnX && mouseX <= btnX + btnW && mouseY >= y && mouseY <= y + btnH;
-            g.fill(btnX, y, btnX + btnW, y + btnH, hv1 ? 0xFF2A3A52 : 0xFF23262F);
-            g.drawCenteredString(this.font, Component.literal("扫码登录"), cx2, y + 6, accent);
-            y += btnH + 8;
-
-            // 手机登录按钮
-            boolean hv2 = mouseX >= btnX && mouseX <= btnX + btnW && mouseY >= y && mouseY <= y + btnH;
-            g.fill(btnX, y, btnX + btnW, y + btnH, hv2 ? 0xFF2A3A52 : 0xFF23262F);
-            g.drawCenteredString(this.font, Component.literal("手机登录"), cx2, y + 6, accent);
-            y += btnH + 8;
-
-            // 邮箱登录按钮
-            boolean hv3 = mouseX >= btnX && mouseX <= btnX + btnW && mouseY >= y && mouseY <= y + btnH;
-            g.fill(btnX, y, btnX + btnW, y + btnH, hv3 ? 0xFF2A3A52 : 0xFF23262F);
-            g.drawCenteredString(this.font, Component.literal("邮箱登录"), cx2, y + 6, accent);
+            NeteaseUser u = userDetail != null ? userDetail : NeteaseSession.getInstance().getCurrentUser();
+            if (u == null) { g.drawCenteredString(this.font, Component.literal("加载中..."), cx2, y + 40, dim); return; }
+            int avSz = 56, avX = cx2 - avSz / 2;
+            renderCover(g, u.avatarUrl, avX, y, avSz);
+            y += avSz + 8;
+            g.drawCenteredString(this.font, Component.literal(u.nickname), cx2, y, text); y += 14;
+            int ix = SIDEBAR_W + 20;
+            g.drawString(this.font, Component.literal("🆔 ID: " + u.userId), ix, y, dim, false); y += 16;
+            g.drawString(this.font, Component.literal("🎵 听歌: " + (u.listenSongs > 0 ? u.listenSongs + "首" : "未知")), ix, y, accent, false); y += 16;
+            g.drawString(this.font, Component.literal("📊 等级: " + (u.level > 0 ? "Lv." + u.level : "未知")), ix, y, accent, false); y += 16;
+            g.drawString(this.font, Component.literal("📅 注册: " + fmtDate(u.createTime)), ix, y, dim, false); y += 16;
+            g.drawString(this.font, Component.literal("📍 地区: " + RegionCodeMapper.formatLocation(u.province, u.city)), ix, y, dim, false); y += 16;
+            g.drawString(this.font, Component.literal("⚧ 性别: " + (u.gender == 1 ? "男" : u.gender == 2 ? "女" : "保密")), ix, y, dim, false); y += 24;
+            int btnW = 80, btnX = cx2 - btnW / 2;
+            boolean hv = mouseX >= btnX && mouseX <= btnX + btnW && mouseY >= y && mouseY <= y + 18;
+            g.fill(btnX, y, btnX + btnW, y + 18, hv ? 0x80FF6666 : 0x40FF6666);
+            g.drawCenteredString(this.font, Component.literal("退出登录"), cx2, y + 5, 0xFFFF6666);
             return;
         }
 
-        // 已登录：显示用户信息
-        NeteaseUser u = userDetail != null ? userDetail : NeteaseSession.getInstance().getCurrentUser();
-        if (u == null) { g.drawCenteredString(this.font, Component.literal("加载中..."), cx2, y + 40, dim); return; }
+        // 未登录
+        if (loginMode == 0)
+        {
+            // 选择登录方式
+            g.drawCenteredString(this.font, Component.literal("网易云登录"), cx2, y, accent); y += 28;
+            int btnW = 120, btnH = 20, btnX = cx2 - btnW / 2;
+            String[] modes = {"扫码登录", "手机登录", "邮箱登录"};
+            for (int i = 0; i < 3; i++)
+            {
+                boolean hv = mouseX >= btnX && mouseX <= btnX + btnW && mouseY >= y && mouseY <= y + btnH;
+                g.fill(btnX, y, btnX + btnW, y + btnH, hv ? 0xFF2A3A52 : 0xFF23262F);
+                g.drawCenteredString(this.font, Component.literal(modes[i]), cx2, y + 6, accent);
+                y += btnH + 8;
+            }
+            return;
+        }
 
-        // 头像
-        int avSz = 56, avX = cx2 - avSz / 2;
-        renderCover(g, u.avatarUrl, avX, y, avSz);
-        y += avSz + 8;
-        g.drawCenteredString(this.font, Component.literal(u.nickname), cx2, y, text); y += 14;
-        int ix = SIDEBAR_W + 20;
-        g.drawString(this.font, Component.literal("🆔 ID: " + u.userId), ix, y, dim, false); y += 16;
-        g.drawString(this.font, Component.literal("🎵 听歌: " + (u.listenSongs > 0 ? u.listenSongs + "首" : "未知")), ix, y, accent, false); y += 16;
-        g.drawString(this.font, Component.literal("📊 等级: " + (u.level > 0 ? "Lv." + u.level : "未知")), ix, y, accent, false); y += 16;
-        g.drawString(this.font, Component.literal("📅 注册: " + fmtDate(u.createTime)), ix, y, dim, false); y += 16;
-        g.drawString(this.font, Component.literal("📍 地区: " + RegionCodeMapper.formatLocation(u.province, u.city)), ix, y, dim, false); y += 16;
-        g.drawString(this.font, Component.literal("⚧ 性别: " + (u.gender == 1 ? "男" : u.gender == 2 ? "女" : "保密")), ix, y, dim, false); y += 24;
-        // 退出登录按钮
-        int btnW = 80, btnX = cx2 - btnW / 2;
-        boolean hv = mouseX >= btnX && mouseX <= btnX + btnW && mouseY >= y && mouseY <= y + 18;
-        g.fill(btnX, y, btnX + btnW, y + 18, hv ? 0x80FF6666 : 0x40FF6666);
-        g.drawCenteredString(this.font, Component.literal("退出登录"), cx2, y + 5, 0xFFFF6666);
+        // 登录状态消息
+        if (!loginStatus.isEmpty())
+            g.drawCenteredString(this.font, Component.literal(loginStatus), cx2, y + 60, loginStatusColor);
+
+        if (loginMode == 1)
+        {
+            // 扫码登录：显示二维码
+            g.drawCenteredString(this.font, Component.literal("扫码登录"), cx2, y, accent); y += 20;
+            if (qrImage != null)
+            {
+                int sz = 140, qx = cx2 - sz / 2;
+                g.fill(qx - 4, y - 4, qx + sz + 4, y + sz + 4, 0xFFFFFFFF);
+                int ps = sz / Math.max(qrImage.getWidth(), qrImage.getHeight());
+                for (int py = 0; py < qrImage.getHeight(); py++)
+                    for (int px = 0; px < qrImage.getWidth(); px++)
+                        if (((qrImage.getRGB(px, py) >> 16) & 0xFF) < 128)
+                            g.fill(qx + px * ps, y + py * ps, qx + px * ps + ps, y + py * ps + ps, 0xFF000000);
+            }
+            else g.drawCenteredString(this.font, Component.literal("生成二维码中..."), cx2, y + 60, dim);
+        }
+        else if (loginMode == 2)
+        {
+            // 手机登录
+            g.drawCenteredString(this.font, Component.literal("手机登录"), cx2, y, accent);
+            countryCodeField.visible = true; phoneField.visible = true; captchaField.visible = true;
+            emailField.visible = false; emailPwdField.visible = false;
+        }
+        else if (loginMode == 3)
+        {
+            // 邮箱登录
+            g.drawCenteredString(this.font, Component.literal("邮箱登录"), cx2, y, accent);
+            countryCodeField.visible = false; phoneField.visible = false; captchaField.visible = false;
+            emailField.visible = true; emailPwdField.visible = true;
+        }
     }
 
     // === 歌曲行（带封面缩略图）===
@@ -567,31 +739,27 @@ public class PlayerScreen extends Screen
                 case ACCOUNT:
                     if (!NeteaseSession.getInstance().isLoggedIn())
                     {
-                        // 登录按钮点击 → 跳转到独立登录界面
-                        int cx2 = SIDEBAR_W + (this.width - SIDEBAR_W) / 2;
-                        int btnW = 120, btnX = cx2 - btnW / 2;
-                        int loginY = 36 + 28;
-                        // 扫码登录
-                        if (mx >= btnX && mx <= btnX + btnW && my >= loginY && my <= loginY + 20)
-                        { Minecraft.getInstance().setScreen(new LoginScreen()); return true; }
-                        // 手机登录
-                        if (mx >= btnX && mx <= btnX + btnW && my >= loginY + 28 && my <= loginY + 48)
-                        { Minecraft.getInstance().setScreen(new LoginScreen()); return true; }
-                        // 邮箱登录
-                        if (mx >= btnX && mx <= btnX + btnW && my >= loginY + 56 && my <= loginY + 76)
-                        { Minecraft.getInstance().setScreen(new LoginScreen()); return true; }
+                        if (loginMode == 0)
+                        {
+                            // 选择登录方式按钮
+                            int cx2 = SIDEBAR_W + (this.width - SIDEBAR_W) / 2;
+                            int btnW = 120, btnX = cx2 - btnW / 2;
+                            int loginY = 36 + 28;
+                            for (int i = 0; i < 3; i++)
+                            {
+                                if (mx >= btnX && mx <= btnX + btnW && my >= loginY && my <= loginY + 20)
+                                { loginMode = i + 1; if (loginMode == 1) doLogin(); clearWidgets(); init(); return true; }
+                                loginY += 28;
+                            }
+                        }
                     }
                     else
                     {
-                        // 退出登录按钮
-                        NeteaseUser u = userDetail;
-                        if (u != null)
-                        {
-                            int cx2 = SIDEBAR_W + (this.width - SIDEBAR_W) / 2;
-                            int btnY = 36 + 56 + 8 + 14 + 16 * 7;
-                            if (mx >= cx2 - 40 && mx <= cx2 + 40 && my >= btnY && my <= btnY + 18)
-                            { NeteaseSession.getInstance().logout().thenAccept(v -> Minecraft.getInstance().execute(() -> { userDetail = null; switchTab(Tab.ACCOUNT); })); return true; }
-                        }
+                        // 退出登录
+                        int cx2 = SIDEBAR_W + (this.width - SIDEBAR_W) / 2;
+                        int infoY = 36 + 56 + 8 + 14 + 16 * 7;
+                        if (mx >= cx2 - 40 && mx <= cx2 + 40 && my >= infoY && my <= infoY + 18)
+                        { NeteaseSession.getInstance().logout().thenAccept(v -> Minecraft.getInstance().execute(() -> { userDetail = null; loginMode = 0; switchTab(Tab.ACCOUNT); })); return true; }
                     }
                     break;
             }

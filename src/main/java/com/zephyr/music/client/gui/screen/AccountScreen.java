@@ -34,7 +34,7 @@ public class AccountScreen extends Screen
         int navY = 6;
         addRenderableWidget(Button.builder(Component.literal("播放器"), b -> minecraft.setScreen(new PlayerScreen())).bounds(8, navY, 42, 16).build());
         addRenderableWidget(Button.builder(Component.literal("歌单"), b -> minecraft.setScreen(new PlaylistBrowserScreen())).bounds(54, navY, 40, 16).build());
-        addRenderableWidget(Button.builder(Component.literal("搜索"), b -> minecraft.setScreen(new SearchScreen())).bounds(98, navY, 40, 16).build());
+        addRenderableWidget(Button.builder(Component.literal("搜索"), b -> minecraft.setScreen(new PlayerScreen())).bounds(98, navY, 40, 16).build());
         addRenderableWidget(Button.builder(Component.literal("设置"), b -> minecraft.setScreen(new SettingsScreen())).bounds(142, navY, 40, 16).build());
         addRenderableWidget(Button.builder(Component.literal("✕"), b -> onClose()).bounds(this.width - 22, navY, 14, 16).build());
         addRenderableWidget(Button.builder(Component.literal("退出登录"), b -> doLogout()).bounds(this.width / 2 - 60, this.height - 36, 120, 20).build());
