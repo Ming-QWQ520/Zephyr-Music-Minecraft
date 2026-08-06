@@ -32,6 +32,7 @@ public class ZephyrConfig
     public static final ForgeConfigSpec.BooleanValue HUD_SHOW_COVER;
     public static final ForgeConfigSpec.IntValue HUD_COVER_SIZE;
     public static final ForgeConfigSpec.BooleanValue HUD_SHOW_BORDER;
+    public static final ForgeConfigSpec.BooleanValue HUD_PAUSE_ON_MENU;
 
     // 歌词样式
     public static final ForgeConfigSpec.ConfigValue<String> LYRIC_MODE;
@@ -85,6 +86,8 @@ public class ZephyrConfig
                 .defineInRange("hud_cover_size", 64, 16, 256);
         HUD_SHOW_BORDER = BUILDER.comment("Show panel border")
                 .define("hud_show_border", false);
+        HUD_PAUSE_ON_MENU = BUILDER.comment("Pause playback when game menu is open")
+                .define("hud_pause_on_menu", false);
         BUILDER.pop();
 
         BUILDER.push("lyric");
