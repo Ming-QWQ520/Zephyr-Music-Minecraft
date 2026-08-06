@@ -129,17 +129,39 @@ public class MusicPlayer
         return paused.get();
     }
 
+    /**
+     * ★ 获取当前播放位置（秒）
+     * 使用 SourceDataLine.getMicrosecondPosition() 获取实际音频播放位置
+     * 暂停时位置冻结，seek 时通过 positionOffsetSec 调整
+     */
     public double getPositionSec()
     {
         if (paused.get())
         {
             return positionOffsetSec;
         }
-        if (playing.get() && playStartTimeMs > 0)
+        SourceDataLine line = currentLine;
+        if (line != null && playing.get())
         {
-            return positionOffsetSec + (System.currentTimeMillis() - playStartTimeMs) / 1000.0;
+            try
+            {
+                long curPosUs = line.getMicrosecondPosition();
+                double posSec = positionOffsetSec + (curPosUs - lineStartPosUs) / 1_000_000.0;
+                // 钳制到总时长
+                NeteaseSong song = currentSong.get();
+                if (song != null && song.duration > 0)
+                {
+                    double total = song.duration / 1000.0;
+                    if (posSec > total) posSec = total;
+                }
+                // 单调递增保护
+                if (posSec < lastReturnedPos) return lastReturnedPos;
+                lastReturnedPos = posSec;
+                return posSec;
+            }
+            catch (Exception ignored) {}
         }
-        return 0;
+        return positionOffsetSec;
     }
 
     public float getVolume()
@@ -377,6 +399,8 @@ public class MusicPlayer
         playing.set(true);
         playStartTimeMs = System.currentTimeMillis();
         positionOffsetSec = 0;
+        lineStartPosUs = 0;
+        lastReturnedPos = 0;
 
         playThread = new Thread(this::decodeLoop, "ZephyrMusic-Decode");
         playThread.setDaemon(true);
@@ -486,6 +510,10 @@ public class MusicPlayer
                         {
                             currentLine = createSourceDataLine(sr, ch);
                             currentFormat = currentLine.getFormat();
+                            // ★ 记录 SourceDataLine 起始位置用于准确追踪播放进度
+                            lineStartPosUs = currentLine.getMicrosecondPosition();
+                            positionOffsetSec = 0;
+                            lastReturnedPos = 0;
                             applyVolumeToLine();
                         }
                         catch (LineUnavailableException e)
@@ -571,15 +599,10 @@ public class MusicPlayer
         if (playing.get() && !paused.get())
         {
             paused.set(true);
+            // ★ 保存当前位置到 positionOffsetSec（暂停时 getPositionSec 返回此值）
             positionOffsetSec = getPositionSec();
-            playStartTimeMs = 0;
-            // 停止打卡计时
             ScrobbleManager.getInstance().stopTicking();
-            try
-            {
-                if (currentLine != null) currentLine.stop();
-            }
-            catch (Exception ignored) {}
+            try { if (currentLine != null) currentLine.stop(); } catch (Exception ignored) {}
             listeners.forEach(l -> l.onPlayStateChanged(false, true));
         }
     }
@@ -589,14 +612,13 @@ public class MusicPlayer
         if (playing.get() && paused.get())
         {
             paused.set(false);
-            playStartTimeMs = System.currentTimeMillis();
-            // 恢复打卡计时
-            ScrobbleManager.getInstance().startTicking();
-            try
+            // ★ 恢复时更新 lineStartPosUs，使位置从暂停处继续
+            if (currentLine != null)
             {
-                if (currentLine != null) currentLine.start();
+                lineStartPosUs = currentLine.getMicrosecondPosition();
             }
-            catch (Exception ignored) {}
+            ScrobbleManager.getInstance().startTicking();
+            try { if (currentLine != null) currentLine.start(); } catch (Exception ignored) {}
             listeners.forEach(l -> l.onPlayStateChanged(true, false));
         }
     }
@@ -719,16 +741,36 @@ public class MusicPlayer
     }
 
     /** ★ Seek 到指定位置（秒）- 通过重启流播放实现 */
+    /**
+     * ★ Seek 到指定位置（秒）
+     * 通过调整 positionOffsetSec 和 lineStartPosUs 让 getPositionSec 返回新位置
+     * 实际音频会继续从当前位置播放，但显示位置和歌词同步会跳到目标位置
+     */
     public void seekTo(double targetSec)
     {
         NeteaseSong song = currentSong.get();
         if (song == null) return;
-        // 简单实现：更新 positionOffsetSec，让 getPositionSec 返回新位置
-        // 真正的 seek 需要重新请求 URL 并跳过前面的数据，这里用近似实现
-        positionOffsetSec = targetSec;
-        lineStartPosUs = 0;
+        // 钳制到有效范围
+        double total = song.duration > 0 ? song.duration / 1000.0 : 0;
+        if (total > 0 && targetSec > total) targetSec = total;
+        if (targetSec < 0) targetSec = 0;
+
+        SourceDataLine line = currentLine;
+        if (line != null)
+        {
+            // 调整 offset 使 getPositionSec 返回 targetSec
+            // targetSec = positionOffsetSec + (curPosUs - lineStartPosUs) / 1e6
+            // positionOffsetSec = targetSec - (curPosUs - lineStartPosUs) / 1e6
+            long curPosUs = line.getMicrosecondPosition();
+            positionOffsetSec = targetSec - (curPosUs - lineStartPosUs) / 1_000_000.0;
+        }
+        else
+        {
+            positionOffsetSec = targetSec;
+            lineStartPosUs = 0;
+        }
         lastReturnedPos = targetSec;
-        ZephyrMusic.LOGGER.info("[Zephyr] Seek to {}s", String.format("%.1f", targetSec));
+        ZephyrMusic.LOGGER.info("[Zephyr] Seek to {}s (offset={})", String.format("%.1f", targetSec), String.format("%.1f", positionOffsetSec));
     }
 
     public void shutdown()
