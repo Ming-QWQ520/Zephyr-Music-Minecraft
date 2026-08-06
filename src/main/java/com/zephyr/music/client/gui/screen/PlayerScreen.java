@@ -1,6 +1,7 @@
 package com.zephyr.music.client.gui.screen;
 
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.zephyr.music.ZephyrMusic;
 import com.zephyr.music.api.*;
 import com.zephyr.music.client.audio.CoverTextureManager;
 import com.zephyr.music.client.audio.MusicPlayer;
@@ -48,6 +49,7 @@ public class PlayerScreen extends Screen
 
     // 滚动
     private double scroll = 0;
+    private double scrollMax = 0;
 
     // 进度条/音量条拖动
     private boolean progDrag = false, volDrag = false;
@@ -90,8 +92,10 @@ public class PlayerScreen extends Screen
         // 登录表单（ACCOUNT Tab 未登录时且需要输入框的模式才显示）
         if (currentTab == Tab.ACCOUNT && !NeteaseSession.getInstance().isLoggedIn() && (loginMode == 2 || loginMode == 3))
         {
-            int fx = SIDEBAR_W + (this.width - SIDEBAR_W) / 2 - 100;
-            int fw = 200;
+            int contentW = this.width - SIDEBAR_W;
+            int cx2 = SIDEBAR_W + contentW / 2;
+            int fx = cx2 - 100;  // ★ 自适应：基于内容区域中心
+            int fw = Math.min(200, contentW - 40);
             // 手机登录字段
             countryCodeField = new EditBox(this.font, fx, 80, 40, 16, Component.literal("86"));
             countryCodeField.setValue("86"); countryCodeField.setMaxLength(5);
@@ -116,7 +120,7 @@ public class PlayerScreen extends Screen
             addRenderableWidget(emailField); addRenderableWidget(emailPwdField);
 
             // 登录 + 返回按钮（仅手机/邮箱模式）
-            int btnX = SIDEBAR_W + (this.width - SIDEBAR_W) / 2 - 40;
+            int btnX = cx2 - 40;
             addRenderableWidget(Button.builder(Component.literal("登录"), b -> doLogin())
                     .bounds(btnX, 128, 80, 18).build());
             addRenderableWidget(Button.builder(Component.literal("← 返回"), b -> { loginMode = 0; clearWidgets(); init(); })
@@ -182,22 +186,54 @@ public class PlayerScreen extends Screen
         loginStatus = "生成二维码..."; loginStatusColor = 0xFFCCCCCC; qrImage = null; qrKey = null;
         NeteaseSession.getInstance().getApi().qrKey().thenCompose(resp -> {
             String key = null;
-            if (resp.has("data") && resp.getAsJsonObject("data").has("unikey")) key = resp.getAsJsonObject("data").get("unikey").getAsString();
-            else if (resp.has("unikey")) key = resp.get("unikey").getAsString();
-            if (key == null) { loginStatus = "获取二维码失败"; loginStatusColor = 0xFFFF6666; return CompletableFuture.completedFuture(new JsonObject()); }
+            if (resp.has("data") && resp.getAsJsonObject("data").has("unikey") && !resp.getAsJsonObject("data").get("unikey").isJsonNull())
+                key = resp.getAsJsonObject("data").get("unikey").getAsString();
+            else if (resp.has("unikey") && !resp.get("unikey").isJsonNull())
+                key = resp.get("unikey").getAsString();
+            if (key == null || key.isEmpty())
+            { loginStatus = "获取二维码key失败"; loginStatusColor = 0xFFFF6666; return CompletableFuture.completedFuture(new JsonObject()); }
             qrKey = key;
+            ZephyrMusic.LOGGER.info("[Zephyr] QR key: {}", key);
             return NeteaseSession.getInstance().getApi().qrCreate(key);
         }).thenAccept(resp -> {
+            ZephyrMusic.LOGGER.info("[Zephyr] qrCreate response keys: {}", resp.keySet());
             String qrimg = "";
-            if (resp.has("data") && resp.getAsJsonObject("data").has("qrimg")) qrimg = resp.getAsJsonObject("data").get("qrimg").getAsString();
-            else if (resp.has("qrimg")) qrimg = resp.get("qrimg").getAsString();
-            if (qrimg.startsWith("data:image")) qrimg = qrimg.substring(qrimg.indexOf(",") + 1);
+            if (resp.has("data") && resp.getAsJsonObject("data").has("qrimg") && !resp.getAsJsonObject("data").get("qrimg").isJsonNull())
+                qrimg = resp.getAsJsonObject("data").get("qrimg").getAsString();
+            else if (resp.has("qrimg") && !resp.get("qrimg").isJsonNull())
+                qrimg = resp.get("qrimg").getAsString();
+            if (qrimg.isEmpty()) { loginStatus = "API未返回二维码"; loginStatusColor = 0xFFFF6666; return; }
+            if (qrimg.startsWith("data:image"))
+            {
+                int comma = qrimg.indexOf(",");
+                if (comma > 0) qrimg = qrimg.substring(comma + 1);
+            }
+            final String base64 = qrimg;
             try {
-                byte[] bytes = Base64.getDecoder().decode(qrimg);
-                qrImage = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(bytes));
-                loginStatus = "请使用网易云App扫码"; loginStatusColor = 0xFF4FC3F7;
-                startQrPolling();
-            } catch (Exception e) { loginStatus = "二维码解析失败"; loginStatusColor = 0xFFFF6666; }
+                byte[] bytes = Base64.getDecoder().decode(base64);
+                ZephyrMusic.LOGGER.info("[Zephyr] Decoded QR image: {} bytes", bytes.length);
+                final java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(bytes));
+                if (img != null)
+                {
+                    ZephyrMusic.LOGGER.info("[Zephyr] QR image loaded: {}x{}", img.getWidth(), img.getHeight());
+                    Minecraft.getInstance().execute(() -> {
+                        qrImage = img;
+                        loginStatus = "请使用网易云App扫码"; loginStatusColor = 0xFF4FC3F7;
+                        startQrPolling();
+                    });
+                }
+                else
+                {
+                    Minecraft.getInstance().execute(() -> { loginStatus = "二维码解析失败(null)"; loginStatusColor = 0xFFFF6666; });
+                }
+            } catch (Exception e) {
+                ZephyrMusic.LOGGER.error("[Zephyr] QR decode failed", e);
+                Minecraft.getInstance().execute(() -> { loginStatus = "二维码解析失败: " + e.getMessage(); loginStatusColor = 0xFFFF6666; });
+            }
+        }).exceptionally(e -> {
+            ZephyrMusic.LOGGER.error("[Zephyr] startQrLogin failed", e);
+            Minecraft.getInstance().execute(() -> { loginStatus = "二维码生成失败"; loginStatusColor = 0xFFFF6666; });
+            return null;
         });
     }
 
@@ -288,6 +324,11 @@ public class PlayerScreen extends Screen
         // 搜索框可见性
         searchBox.visible = (currentTab == Tab.SEARCH);
 
+        // ★ 裁剪 + 滚动偏移
+        g.enableScissor(SIDEBAR_W, 4, this.width, this.height - CONTROL_H);
+        g.pose().pushPose();
+        g.pose().translate(0, -scroll, 0);
+
         drawSidebar(g);
         switch (currentTab)
         {
@@ -298,6 +339,10 @@ public class PlayerScreen extends Screen
             case SETTINGS -> drawSettings(g);
             case ACCOUNT -> drawAccount(g);
         }
+
+        g.pose().popPose();
+        g.disableScissor();
+
         drawControlBar(g);
         super.render(g, mx, my, delta);
     }
@@ -460,26 +505,50 @@ public class PlayerScreen extends Screen
         int accent = 0xFF4FC3F7, text = 0xFFFFFFFF, dim = 0xFF888888;
 
         g.drawString(this.font, Component.literal("─── HUD ───"), x, y, accent, false); y += 20;
-        String[][] items = {
-            {"启用HUD", ZephyrConfig.HUD_ENABLED.get() ? "ON" : "OFF"},
-            {"显示封面", ZephyrConfig.HUD_SHOW_COVER.get() ? "ON" : "OFF"},
-            {"显示进度条", ZephyrConfig.HUD_SHOW_PROGRESS_BAR.get() ? "ON" : "OFF"},
-            {"显示歌词", ZephyrConfig.HUD_SHOW_LYRICS.get() ? "ON" : "OFF"},
-            {"菜单时暂停", ZephyrConfig.HUD_PAUSE_ON_MENU.get() ? "ON" : "OFF"},
-            {"紧凑模式", ZephyrConfig.HUD_COMPACT.get() ? "ON" : "OFF"},
-            {"面板宽度", String.valueOf(ZephyrConfig.HUD_PANEL_WIDTH.get())},
-            {"封面大小", String.valueOf(ZephyrConfig.HUD_COVER_SIZE.get())},
-            {"歌词行数", String.valueOf(ZephyrConfig.HUD_LYRICS_LINES.get())},
-            {"音量", String.format("%.0f%%", ZephyrConfig.HUD_VOLUME.get() * 100)},
+        // 设置项: 名称, 值, 是否是滑块(面板宽度/封面大小/歌词行数/音量)
+        Object[][] items = {
+            {"启用HUD", ZephyrConfig.HUD_ENABLED.get() ? "ON" : "OFF", false},
+            {"显示封面", ZephyrConfig.HUD_SHOW_COVER.get() ? "ON" : "OFF", false},
+            {"显示进度条", ZephyrConfig.HUD_SHOW_PROGRESS_BAR.get() ? "ON" : "OFF", false},
+            {"显示歌词", ZephyrConfig.HUD_SHOW_LYRICS.get() ? "ON" : "OFF", false},
+            {"菜单时暂停", ZephyrConfig.HUD_PAUSE_ON_MENU.get() ? "ON" : "OFF", false},
+            {"紧凑模式", ZephyrConfig.HUD_COMPACT.get() ? "ON" : "OFF", false},
+            {"面板宽度", String.valueOf(ZephyrConfig.HUD_PANEL_WIDTH.get()), true},
+            {"封面大小", String.valueOf(ZephyrConfig.HUD_COVER_SIZE.get()), true},
+            {"歌词行数", String.valueOf(ZephyrConfig.HUD_LYRICS_LINES.get()), true},
+            {"音量", String.format("%.0f%%", ZephyrConfig.HUD_VOLUME.get() * 100), true},
         };
-        for (String[] item : items)
+        for (int i = 0; i < items.length; i++)
         {
-            boolean hv = mouseX >= x && mouseX <= x + cw && mouseY >= y - 2 && mouseY <= y + 16;
+            String name = (String)items[i][0];
+            String val = (String)items[i][1];
+            boolean isSlider = (boolean)items[i][2];
+            boolean hv = mouseX >= x && mouseX <= x + cw && mouseY >= y - 2 + scroll && mouseY <= y + 16 + scroll;
             if (hv) g.fill(x - 4, y - 2, x + cw, y + 16, 0xFF23262F);
-            g.drawString(this.font, Component.literal(item[0]), x, y, text, false);
-            int vw = this.font.width(item[1]);
-            g.fill(x + cw - vw - 12, y - 1, x + cw, y + 12, 0xFF2E3240);
-            g.drawString(this.font, Component.literal(item[1]), x + cw - vw - 6, y, accent, false);
+            g.drawString(this.font, Component.literal(name), x, y, text, false);
+            int vw = this.font.width(val);
+            int valX = x + cw - vw - 12;
+            g.fill(valX, y - 1, x + cw, y + 12, 0xFF2E3240);
+            g.drawString(this.font, Component.literal(val), valX + 6, y, accent, false);
+            // ★ 滑块项绘制进度条
+            if (isSlider)
+            {
+                int sliderX = x + 100;
+                int sliderW = valX - sliderX - 6;
+                if (sliderW > 20)
+                {
+                    double ratio = 0;
+                    if (name.contains("面板宽度")) ratio = (ZephyrConfig.HUD_PANEL_WIDTH.get() - 100) / 500.0;
+                    else if (name.contains("封面大小")) ratio = (ZephyrConfig.HUD_COVER_SIZE.get() - 16) / 240.0;
+                    else if (name.contains("歌词行数")) ratio = (ZephyrConfig.HUD_LYRICS_LINES.get() - 1) / 11.0;
+                    else if (name.contains("音量")) ratio = ZephyrConfig.HUD_VOLUME.get();
+                    ratio = Math.max(0, Math.min(1, ratio));
+                    g.fill(sliderX, y + 5, sliderX + sliderW, y + 8, 0xFF444444);
+                    int fw2 = (int)(sliderW * ratio);
+                    g.fill(sliderX, y + 5, sliderX + fw2, y + 8, accent);
+                    g.fill(sliderX + fw2 - 1, y + 3, sliderX + fw2 + 3, y + 10, accent);
+                }
+            }
             y += 18;
         }
         y += 8;
@@ -487,7 +556,7 @@ public class PlayerScreen extends Screen
         String[][] litems = {{"卡拉OK", ZephyrConfig.LYRIC_KARAOKE.get() ? "ON" : "OFF"}, {"歌词模式", ZephyrConfig.LYRIC_MODE.get()}};
         for (String[] item : litems)
         {
-            boolean hv = mouseX >= x && mouseX <= x + cw && mouseY >= y - 2 && mouseY <= y + 16;
+            boolean hv = mouseX >= x && mouseX <= x + cw && mouseY >= y - 2 + scroll && mouseY <= y + 16 + scroll;
             if (hv) g.fill(x - 4, y - 2, x + cw, y + 16, 0xFF23262F);
             g.drawString(this.font, Component.literal(item[0]), x, y, text, false);
             g.drawString(this.font, Component.literal(item[1]), x + cw - 60, y, accent, false);
@@ -499,12 +568,20 @@ public class PlayerScreen extends Screen
         g.drawString(this.font, Component.literal(ZephyrConfig.DEFAULT_QUALITY.get()), x + cw - 60, y, accent, false); y += 18;
         g.drawString(this.font, Component.literal("打卡"), x, y, text, false);
         g.drawString(this.font, Component.literal(ZephyrConfig.SCROBBLE_ENABLED.get() ? "ON" : "OFF"), x + cw - 60, y, accent, false);
+
+        // ★ 设置滚动上限
+        int contentH = this.height - CONTROL_H - 36;
+        int totalH = y - 36 + 20;
+        scrollMax = Math.max(0, totalH - contentH);
+        if (scroll > scrollMax) scroll = scrollMax;
+        if (scroll < 0) scroll = 0;
     }
 
     // === 账号/登录页 ===
     private void drawAccount(GuiGraphics g)
     {
-        int cx2 = SIDEBAR_W + (this.width - SIDEBAR_W) / 2;
+        int contentW = this.width - SIDEBAR_W;
+        int cx2 = SIDEBAR_W + contentW / 2;
         int y = 36;
         int accent = 0xFF4FC3F7, text = 0xFFFFFFFF, dim = 0xFF888888;
 
@@ -849,7 +926,7 @@ public class PlayerScreen extends Screen
         if (mx >= SIDEBAR_W)
         {
             scroll -= delta * 30;
-            scroll = Math.max(0, scroll);
+            scroll = Math.max(0, Math.min(scroll, scrollMax > 0 ? scrollMax : 9999));
             return true;
         }
         return super.mouseScrolled(mx, my, delta);
