@@ -87,8 +87,8 @@ public class PlayerScreen extends Screen
         progBarW = this.width - SIDEBAR_W - 40;
         progBarY = this.height - CONTROL_H + 6;
 
-        // 登录表单（ACCOUNT Tab 未登录时显示）
-        if (currentTab == Tab.ACCOUNT && !NeteaseSession.getInstance().isLoggedIn())
+        // 登录表单（ACCOUNT Tab 未登录时且需要输入框的模式才显示）
+        if (currentTab == Tab.ACCOUNT && !NeteaseSession.getInstance().isLoggedIn() && (loginMode == 2 || loginMode == 3))
         {
             int fx = SIDEBAR_W + (this.width - SIDEBAR_W) / 2 - 100;
             int fw = 200;
@@ -106,15 +106,16 @@ public class PlayerScreen extends Screen
             emailPwdField.setHint(Component.literal("密码")); emailPwdField.setMaxLength(64);
             emailPwdField.setFormatter((s, i) -> net.minecraft.util.FormattedCharSequence.forward("*".repeat(s.length()), net.minecraft.network.chat.Style.EMPTY));
 
-            // 搜索框可见性
+            // 可见性
             searchBox.visible = (currentTab == Tab.SEARCH);
-            // 登录字段初始不可见
-            countryCodeField.visible = false; phoneField.visible = false; captchaField.visible = false;
-            emailField.visible = false; emailPwdField.visible = false;
+            boolean showPhone = (loginMode == 2);
+            boolean showEmail = (loginMode == 3);
+            countryCodeField.visible = showPhone; phoneField.visible = showPhone; captchaField.visible = showPhone;
+            emailField.visible = showEmail; emailPwdField.visible = showEmail;
             addRenderableWidget(countryCodeField); addRenderableWidget(phoneField); addRenderableWidget(captchaField);
             addRenderableWidget(emailField); addRenderableWidget(emailPwdField);
 
-            // 登录按钮
+            // 登录 + 返回按钮（仅手机/邮箱模式）
             int btnX = SIDEBAR_W + (this.width - SIDEBAR_W) / 2 - 40;
             addRenderableWidget(Button.builder(Component.literal("登录"), b -> doLogin())
                     .bounds(btnX, 128, 80, 18).build());
@@ -548,38 +549,58 @@ public class PlayerScreen extends Screen
         }
 
         // 登录状态消息
-        if (!loginStatus.isEmpty())
-            g.drawCenteredString(this.font, Component.literal(loginStatus), cx2, y + 60, loginStatusColor);
-
         if (loginMode == 1)
         {
-            // 扫码登录：显示二维码
+            // 扫码登录：标题 + 二维码 + 状态 + 返回按钮
             g.drawCenteredString(this.font, Component.literal("扫码登录"), cx2, y, accent); y += 20;
             if (qrImage != null)
             {
                 int sz = 140, qx = cx2 - sz / 2;
+                // 白色背景
                 g.fill(qx - 4, y - 4, qx + sz + 4, y + sz + 4, 0xFFFFFFFF);
+                // 绘制二维码像素
                 int ps = sz / Math.max(qrImage.getWidth(), qrImage.getHeight());
+                int aw = qrImage.getWidth() * ps;
+                int ah = qrImage.getHeight() * ps;
+                int sx = qx + (sz - aw) / 2;
+                int sy = y + (sz - ah) / 2;
                 for (int py = 0; py < qrImage.getHeight(); py++)
                     for (int px = 0; px < qrImage.getWidth(); px++)
                         if (((qrImage.getRGB(px, py) >> 16) & 0xFF) < 128)
-                            g.fill(qx + px * ps, y + py * ps, qx + px * ps + ps, y + py * ps + ps, 0xFF000000);
+                            g.fill(sx + px * ps, sy + py * ps, sx + px * ps + ps, sy + py * ps + ps, 0xFF000000);
+                // 状态文字在二维码下方
+                y += sz + 12;
+                g.drawCenteredString(this.font, Component.literal(loginStatus.isEmpty() ? "请使用网易云App扫码" : loginStatus), cx2, y, loginStatusColor);
+                y += 16;
+                // 返回按钮（手动渲染，不在 init 中创建）
+                int btnW = 80, btnX = cx2 - btnW / 2;
+                boolean hv = mouseX >= btnX && mouseX <= btnX + btnW && mouseY >= y && mouseY <= y + 18;
+                g.fill(btnX, y, btnX + btnW, y + 18, hv ? 0xFF2A3A52 : 0xFF23262F);
+                g.drawCenteredString(this.font, Component.literal("← 返回"), cx2, y + 5, accent);
             }
-            else g.drawCenteredString(this.font, Component.literal("生成二维码中..."), cx2, y + 60, dim);
+            else
+            {
+                // 等待生成
+                int ph = 140, px2 = cx2 - ph / 2;
+                g.fill(px2 - 4, y - 4, px2 + ph + 4, y + ph + 4, 0xFFFFFFFF);
+                g.drawCenteredString(this.font, Component.literal("..."), cx2, y + ph / 2 - 4, 0xFF888888);
+                y += ph + 12;
+                g.drawCenteredString(this.font, Component.literal(loginStatus.isEmpty() ? "生成二维码中..." : loginStatus), cx2, y, loginStatusColor);
+            }
         }
         else if (loginMode == 2)
         {
-            // 手机登录
+            // 手机登录：标题 + 输入框（在 init 中创建）+ 状态
             g.drawCenteredString(this.font, Component.literal("手机登录"), cx2, y, accent);
-            countryCodeField.visible = true; phoneField.visible = true; captchaField.visible = true;
-            emailField.visible = false; emailPwdField.visible = false;
+            if (!loginStatus.isEmpty())
+                g.drawCenteredString(this.font, Component.literal(loginStatus), cx2, y + 70, loginStatusColor);
         }
         else if (loginMode == 3)
         {
             // 邮箱登录
             g.drawCenteredString(this.font, Component.literal("邮箱登录"), cx2, y, accent);
-            countryCodeField.visible = false; phoneField.visible = false; captchaField.visible = false;
-            emailField.visible = true; emailPwdField.visible = true;
+            if (!loginStatus.isEmpty())
+                g.drawCenteredString(this.font, Component.literal(loginStatus), cx2, y + 70, loginStatusColor);
         }
     }
 
@@ -748,9 +769,18 @@ public class PlayerScreen extends Screen
                             for (int i = 0; i < 3; i++)
                             {
                                 if (mx >= btnX && mx <= btnX + btnW && my >= loginY && my <= loginY + 20)
-                                { loginMode = i + 1; if (loginMode == 1) doLogin(); clearWidgets(); init(); return true; }
+                                { loginMode = i + 1; if (loginMode == 1) startQrLogin(); clearWidgets(); init(); return true; }
                                 loginY += 28;
                             }
+                        }
+                        else if (loginMode == 1)
+                        {
+                            // 扫码模式：返回按钮在二维码下方
+                            int cx2 = SIDEBAR_W + (this.width - SIDEBAR_W) / 2;
+                            int backY = 36 + 20 + 140 + 12 + 16; // 标题20 + 二维码140 + 间距12 + 状态16
+                            int btnW = 80, btnX = cx2 - btnW / 2;
+                            if (mx >= btnX && mx <= btnX + btnW && my >= backY && my <= backY + 18)
+                            { loginMode = 0; if (qrTimer != null) { qrTimer.cancel(); qrTimer = null; } qrImage = null; clearWidgets(); init(); return true; }
                         }
                     }
                     else
