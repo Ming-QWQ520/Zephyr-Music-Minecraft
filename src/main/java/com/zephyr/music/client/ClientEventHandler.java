@@ -56,9 +56,15 @@ public class ClientEventHandler
             // F7: 打开播放器，有 cookie 切换到歌单 Tab，没有则切换到登录 Tab
             PlayerScreen ps = new PlayerScreen();
             if (!com.zephyr.music.config.ZephyrConfig.COOKIE.get().isEmpty())
+            {
                 ps.setCurrentTab(PlayerScreen.Tab.PLAYLIST);
+                // ★ 异步检查登录状态，更新用户信息
+                com.zephyr.music.api.NeteaseSession.getInstance().checkLoginStatus();
+            }
             else
+            {
                 ps.setCurrentTab(PlayerScreen.Tab.ACCOUNT);
+            }
             mc.setScreen(ps);
         }
     }

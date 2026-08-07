@@ -90,7 +90,7 @@ public class PlayerScreen extends Screen
         progBarY = this.height - CONTROL_H + 6;
 
         // 登录表单（ACCOUNT Tab 未登录时且需要输入框的模式才显示）
-        if (currentTab == Tab.ACCOUNT && !NeteaseSession.getInstance().isLoggedIn() && (loginMode == 2 || loginMode == 3))
+        if (currentTab == Tab.ACCOUNT && !(NeteaseSession.getInstance().isLoggedIn() || !com.zephyr.music.config.ZephyrConfig.COOKIE.get().isEmpty()) && (loginMode == 2 || loginMode == 3))
         {
             int contentW = this.width - SIDEBAR_W;
             int cx2 = SIDEBAR_W + contentW / 2;
@@ -569,6 +569,26 @@ public class PlayerScreen extends Screen
         g.drawString(this.font, Component.literal(ZephyrConfig.DEFAULT_QUALITY.get()), x + cw - 60, y, accent, false); y += 18;
         g.drawString(this.font, Component.literal("打卡"), x, y, text, false);
         g.drawString(this.font, Component.literal(ZephyrConfig.SCROBBLE_ENABLED.get() ? "ON" : "OFF"), x + cw - 60, y, accent, false);
+        y += 18;
+        // ★ 增加缺失的配置项
+        g.drawString(this.font, Component.literal("API地址"), x, y, text, false);
+        String apiBase = ZephyrConfig.API_BASE.get();
+        if (apiBase.length() > 30) apiBase = apiBase.substring(0, 29) + "…";
+        g.drawString(this.font, Component.literal(apiBase), x + cw - 120, y, accent, false); y += 18;
+        g.drawString(this.font, Component.literal("歌词字号"), x, y, text, false);
+        g.drawString(this.font, Component.literal(String.valueOf(ZephyrConfig.LYRIC_FONT_SIZE.get())), x + cw - 60, y, accent, false); y += 18;
+        g.drawString(this.font, Component.literal("歌词滚动"), x, y, text, false);
+        g.drawString(this.font, Component.literal(ZephyrConfig.LYRIC_SCROLL.get() ? "ON" : "OFF"), x + cw - 60, y, accent, false); y += 18;
+        g.drawString(this.font, Component.literal("边框"), x, y, text, false);
+        g.drawString(this.font, Component.literal(ZephyrConfig.HUD_SHOW_BORDER.get() ? "ON" : "OFF"), x + cw - 60, y, accent, false); y += 18;
+        g.drawString(this.font, Component.literal("背景透明度"), x, y, text, false);
+        g.drawString(this.font, Component.literal(String.format("%.0f%%", ZephyrConfig.HUD_BG_OPACITY.get() * 100)), x + cw - 60, y, accent, false); y += 18;
+        g.drawString(this.font, Component.literal("HUD锚点"), x, y, text, false);
+        g.drawString(this.font, Component.literal(ZephyrConfig.HUD_ANCHOR.get()), x + cw - 80, y, accent, false); y += 18;
+        g.drawString(this.font, Component.literal("主题色"), x, y, text, false);
+        g.drawString(this.font, Component.literal(ZephyrConfig.THEME_PRIMARY.get()), x + cw - 80, y, accent, false); y += 18;
+        g.drawString(this.font, Component.literal("背景色"), x, y, text, false);
+        g.drawString(this.font, Component.literal(ZephyrConfig.THEME_BG.get()), x + cw - 80, y, accent, false); y += 18;
 
         // ★ 设置滚动上限
         int contentH = this.height - CONTROL_H - 36;
@@ -586,8 +606,12 @@ public class PlayerScreen extends Screen
         int y = 36;
         int accent = 0xFF4FC3F7, text = 0xFFFFFFFF, dim = 0xFF888888;
 
+        // ★ 有 cookie 就认为已登录（即使 checkLoginStatus 还没执行）
+        boolean hasCookie = !com.zephyr.music.config.ZephyrConfig.COOKIE.get().isEmpty();
+        boolean loggedIn = NeteaseSession.getInstance().isLoggedIn() || hasCookie;
+
         // 已登录：显示用户信息
-        if (NeteaseSession.getInstance().isLoggedIn())
+        if (loggedIn)
         {
             NeteaseUser u = userDetail != null ? userDetail : NeteaseSession.getInstance().getCurrentUser();
             if (u == null) { g.drawCenteredString(this.font, Component.literal("加载中..."), cx2, y + 40, dim); return; }
@@ -610,7 +634,7 @@ public class PlayerScreen extends Screen
         }
 
         // 未登录
-        if (loginMode == 0)
+        if (!loggedIn && loginMode == 0)
         {
             // 选择登录方式
             g.drawCenteredString(this.font, Component.literal("网易云登录"), cx2, y, accent); y += 28;
