@@ -636,16 +636,31 @@ public class PlayerScreen extends Screen
                 int sz = 140, qx = cx2 - sz / 2;
                 // 白色背景
                 g.fill(qx - 4, y - 4, qx + sz + 4, y + sz + 4, 0xFFFFFFFF);
-                // 绘制二维码像素
-                int ps = sz / Math.max(qrImage.getWidth(), qrImage.getHeight());
-                int aw = qrImage.getWidth() * ps;
-                int ah = qrImage.getHeight() * ps;
+                // ★ 修复: ps 用浮点计算再取整，避免 140/180=0
+                int imgW = qrImage.getWidth();
+                int imgH = qrImage.getHeight();
+                double psD = (double)sz / Math.max(imgW, imgH);
+                int aw = (int)(imgW * psD);
+                int ah = (int)(imgH * psD);
                 int sx = qx + (sz - aw) / 2;
                 int sy = y + (sz - ah) / 2;
-                for (int py = 0; py < qrImage.getHeight(); py++)
-                    for (int px = 0; px < qrImage.getWidth(); px++)
+                ZephyrMusic.LOGGER.debug("[Zephyr] QR render: img={}x{}, ps={}, area={}x{}, sx={}, sy={}", imgW, imgH, psD, aw, ah, sx, sy);
+                for (int py = 0; py < imgH; py++)
+                {
+                    int drawY = sy + (int)(py * psD);
+                    int drawH = sy + (int)((py + 1) * psD) - drawY;
+                    if (drawH <= 0) drawH = 1;
+                    for (int px = 0; px < imgW; px++)
+                    {
                         if (((qrImage.getRGB(px, py) >> 16) & 0xFF) < 128)
-                            g.fill(sx + px * ps, sy + py * ps, sx + px * ps + ps, sy + py * ps + ps, 0xFF000000);
+                        {
+                            int drawX = sx + (int)(px * psD);
+                            int drawW = sx + (int)((px + 1) * psD) - drawX;
+                            if (drawW <= 0) drawW = 1;
+                            g.fill(drawX, drawY, drawX + drawW, drawY + drawH, 0xFF000000);
+                        }
+                    }
+                }
                 // 状态文字在二维码下方
                 y += sz + 12;
                 g.drawCenteredString(this.font, Component.literal(loginStatus.isEmpty() ? "请使用网易云App扫码" : loginStatus), cx2, y, loginStatusColor);
