@@ -742,12 +742,7 @@ public class MusicPlayer
         if (queueIndex < 0 || !playing.get()) { queueIndex = queue.size() - 1; playSong(song); }
     }
 
-    /** ★ Seek 到指定位置（秒）- 通过重启流播放实现 */
-    /**
-     * ★ Seek 到指定位置（秒）
-     * 通过调整 positionOffsetSec 和 lineStartPosUs 让 getPositionSec 返回新位置
-     * 实际音频会继续从当前位置播放，但显示位置和歌词同步会跳到目标位置
-     */
+    /** ★ Seek 到指定位置（秒）- 重新打开流并跳过前面的帧 */
     public void seekTo(double targetSec)
     {
         NeteaseSong song = currentSong.get();
@@ -756,24 +751,92 @@ public class MusicPlayer
         if (total > 0 && targetSec > total) targetSec = total;
         if (targetSec < 0) targetSec = 0;
 
-        SourceDataLine line = currentLine;
-        if (line != null)
-        {
-            long curPosUs = line.getMicrosecondPosition();
-            double oldPos = positionOffsetSec + (curPosUs - lineStartPosUs) / 1_000_000.0;
-            positionOffsetSec = targetSec - (curPosUs - lineStartPosUs) / 1_000_000.0;
-            lastReturnedPos = targetSec;
-            ZephyrMusic.LOGGER.info("[Zephyr] Seek: {}s -> {}s (offset={}, linePos={}us, oldPos={})",
-                    String.format("%.1f", oldPos), String.format("%.1f", targetSec),
-                    String.format("%.1f", positionOffsetSec), curPosUs, String.format("%.1f", oldPos));
-        }
-        else
-        {
-            positionOffsetSec = targetSec;
-            lineStartPosUs = 0;
-            lastReturnedPos = targetSec;
-            ZephyrMusic.LOGGER.info("[Zephyr] Seek (no line): {}s", String.format("%.1f", targetSec));
-        }
+        ZephyrMusic.LOGGER.info("[Zephyr] Seek to {}s", String.format("%.1f", targetSec));
+
+        // ★ 真正 seek: 停止当前播放，异步重新打开流并跳过帧
+        final double seekTarget = targetSec;
+        final NeteaseSong seekSong = song;
+        final String level = ZephyrConfig.DEFAULT_QUALITY.get();
+        final int seekQueueIndex = queueIndex;
+
+        // 停止解码线程
+        stopped.set(true);
+        cleanupPlaybackResources();
+
+        playExecutor.submit(() -> {
+            try
+            {
+                // 重新获取 URL
+                JsonObject urlResp = NeteaseSession.getInstance().getApi().songUrlV1(seekSong.id, level == null ? "exhigh" : level).join();
+                String url = NeteaseApi.extractSongUrl(urlResp);
+                if (url == null || url.isEmpty())
+                {
+                    urlResp = NeteaseSession.getInstance().getApi().songUrl(seekSong.id).join();
+                    url = NeteaseApi.extractSongUrl(urlResp);
+                }
+                if (url == null || url.isEmpty())
+                {
+                    ZephyrMusic.LOGGER.warn("[Zephyr] Seek: cannot get URL");
+                    return;
+                }
+
+                // 重新打开流
+                java.net.URL audioUrl = URI.create(url).toURL();
+                HttpURLConnection conn = (HttpURLConnection) audioUrl.openConnection();
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(60000);
+                conn.setRequestProperty("User-Agent", "ZephyrMusic-Mod/1.0");
+                conn.setRequestProperty("Referer", "https://music.163.com/");
+                conn.connect();
+                if (conn.getResponseCode() != 200) return;
+
+                InputStream is = new BufferedInputStream(conn.getInputStream(), 64 * 1024);
+                currentConnection = conn;
+                currentBitstream = new Bitstream(is);
+                currentDecoder = new Decoder();
+                currentLine = null;
+                currentFormat = null;
+
+                // 计算需要跳过的帧数（近似：MP3 44100Hz 每帧 1152 samples = 26.12ms）
+                // 也可以用 JLayer Header 的 frame count 计算
+                int skipFrames = (int)(seekTarget * 38.28); // 38.28 frames/sec at 44100Hz
+
+                stopped.set(false);
+                paused.set(false);
+                playing.set(true);
+                positionOffsetSec = seekTarget;
+                lineStartPosUs = 0;
+                lastReturnedPos = seekTarget;
+                playStartTimeMs = System.currentTimeMillis();
+
+                ZephyrMusic.LOGGER.info("[Zephyr] Seek: skipping {} frames to {}s", skipFrames, String.format("%.1f", seekTarget));
+
+                // 跳过帧（不解码到音频设备，只读 Bitstream）
+                int skipped = 0;
+                for (int i = 0; i < skipFrames && !stopped.get(); i++)
+                {
+                    try
+                    {
+                        Header frame = currentBitstream.readFrame();
+                        if (frame == null) break;
+                        currentBitstream.closeFrame();
+                        skipped++;
+                    }
+                    catch (Exception e) { break; }
+                }
+                ZephyrMusic.LOGGER.info("[Zephyr] Seek: skipped {} frames", skipped);
+
+                // 开始正常播放
+                playThread = new Thread(this::decodeLoop, "ZephyrMusic-Decode");
+                playThread.setDaemon(true);
+                playThread.setPriority(Thread.MAX_PRIORITY);
+                playThread.start();
+            }
+            catch (Exception e)
+            {
+                ZephyrMusic.LOGGER.error("[Zephyr] Seek failed", e);
+            }
+        });
     }
 
     public void shutdown()
