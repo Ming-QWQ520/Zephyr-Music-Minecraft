@@ -148,9 +148,7 @@ public class PlayerScreen extends Screen
     // === 登录 ===
     private void doLogin()
     {
-        if (loginMode == 1)
-        { startQrLogin(); }
-        else if (loginMode == 2)
+        if (loginMode == 2)
         {
             String phone = phoneField.getValue().trim();
             String ct = countryCodeField.getValue().trim();
@@ -213,7 +211,7 @@ public class PlayerScreen extends Screen
                 byte[] bytes = Base64.getDecoder().decode(base64);
                 ZephyrMusic.LOGGER.info("[Zephyr] Decoded QR image: {} bytes", bytes.length);
                 final java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(bytes));
-                if (img != null)
+                if (img != null && img.getWidth() > 0)
                 {
                     ZephyrMusic.LOGGER.info("[Zephyr] QR image loaded: {}x{}", img.getWidth(), img.getHeight());
                     Minecraft.getInstance().execute(() -> {
@@ -224,10 +222,11 @@ public class PlayerScreen extends Screen
                 }
                 else
                 {
+                    ZephyrMusic.LOGGER.error("[Zephyr] ImageIO.read returned null or empty image");
                     Minecraft.getInstance().execute(() -> { loginStatus = "二维码解析失败(null)"; loginStatusColor = 0xFFFF6666; });
                 }
             } catch (Exception e) {
-                ZephyrMusic.LOGGER.error("[Zephyr] QR decode failed", e);
+                ZephyrMusic.LOGGER.error("[Zephyr] QR decode failed: {}", e.getMessage());
                 Minecraft.getInstance().execute(() -> { loginStatus = "二维码解析失败: " + e.getMessage(); loginStatusColor = 0xFFFF6666; });
             }
         }).exceptionally(e -> {
@@ -324,12 +323,14 @@ public class PlayerScreen extends Screen
         // 搜索框可见性
         searchBox.visible = (currentTab == Tab.SEARCH);
 
-        // ★ 裁剪 + 滚动偏移
+        // ★ 左侧边栏不在裁剪区域内（独立渲染）
+        drawSidebar(g);
+
+        // ★ 右侧内容区域裁剪 + 滚动偏移
         g.enableScissor(SIDEBAR_W, 4, this.width, this.height - CONTROL_H);
         g.pose().pushPose();
         g.pose().translate(0, -scroll, 0);
 
-        drawSidebar(g);
         switch (currentTab)
         {
             case LYRICS -> drawLyrics(g);
