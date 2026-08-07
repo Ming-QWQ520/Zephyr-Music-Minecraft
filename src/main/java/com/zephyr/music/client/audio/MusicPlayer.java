@@ -404,6 +404,8 @@ public class MusicPlayer
 
         playThread = new Thread(this::decodeLoop, "ZephyrMusic-Decode");
         playThread.setDaemon(true);
+        // ★ 修复: 设置最高优先级，窗口失焦时不卡顿
+        playThread.setPriority(Thread.MAX_PRIORITY);
         playThread.start();
 
         // ★ 启动打卡计时（播放开始）

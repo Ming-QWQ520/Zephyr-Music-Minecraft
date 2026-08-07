@@ -848,7 +848,7 @@ public class PlayerScreen extends Screen
                     { MusicPlayer.getInstance().jumpTo(qidx); return true; }
                     break;
                 case SETTINGS:
-                    toggleSetting((int)(my - 36 + scroll), (int)(mx - contentX));
+                    toggleSetting((int)(my - 36 + scroll), (int)(mx - contentX), (int)(this.width - contentX));
                     break;
                 case ACCOUNT:
                     if (!NeteaseSession.getInstance().isLoggedIn())
@@ -890,15 +890,37 @@ public class PlayerScreen extends Screen
         return super.mouseClicked(mx, my, btn);
     }
 
-    private void toggleSetting(int adjY, int adjX)
+    private void toggleSetting(int adjY, int adjX, int contentW)
     {
-        int y = 20; // 跳过标题
-        int[] configIdx = {0,1,2,3,4,5,6,7,8,9};
+        // ★ HUD 设置项从 y=36+20=56 开始（标题占20px），每项18px
+        int startY = 20; // 相对于 y=36 的偏移，跳过标题行
+        int itemH = 18;
         for (int i = 0; i < 10; i++)
         {
-            if (adjY >= y && adjY < y + 18)
+            int itemY = startY + i * itemH;
+            if (adjY >= itemY && adjY < itemY + itemH)
             {
-                if (adjX > 200) // 右半部分点击
+                // ★ 滑块项：点击滑块区域拖动调节
+                if (i >= 6) // 面板宽度/封面大小/歌词行数/音量
+                {
+                    int sliderX = 100; // 相对于 contentX 的偏移
+                    int sliderW = contentW - 120; // 滑块宽度
+                    if (adjX >= sliderX && adjX <= sliderX + sliderW)
+                    {
+                        double ratio = (double)(adjX - sliderX) / sliderW;
+                        ratio = Math.max(0, Math.min(1, ratio));
+                        switch (i)
+                        {
+                            case 6: ZephyrConfig.HUD_PANEL_WIDTH.set((int)(100 + ratio * 500)); break;
+                            case 7: ZephyrConfig.HUD_COVER_SIZE.set((int)(16 + ratio * 240)); break;
+                            case 8: ZephyrConfig.HUD_LYRICS_LINES.set((int)(1 + ratio * 11)); break;
+                            case 9: ZephyrConfig.HUD_VOLUME.set(ratio); break;
+                        }
+                        return;
+                    }
+                }
+                // ★ 非滑块项或点击右侧值区域：切换开关
+                if (adjX > contentW / 2)
                 {
                     switch (i)
                     {
@@ -916,7 +938,6 @@ public class PlayerScreen extends Screen
                 }
                 return;
             }
-            y += 18;
         }
     }
 
