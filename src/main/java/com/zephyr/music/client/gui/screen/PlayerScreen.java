@@ -775,6 +775,13 @@ public class PlayerScreen extends Screen
     @Override
     public boolean mouseClicked(double mx, double my, int btn)
     {
+        // ★ 进度条检查放在最前面（优先级最高）
+        if (mx >= progBarX - 4 && mx <= progBarX + progBarW + 4 && my >= progBarY - 6 && my <= progBarY + 10)
+        { progDrag = true; seekMouse(mx); return true; }
+        // 音量条
+        if (mx >= volBarX - 4 && mx <= volBarX + volBarW + 4 && my >= volBarY - 6 && my <= volBarY + 10)
+        { volDrag = true; volMouse(mx); return true; }
+
         // 侧边栏 Tab
         if (mx < SIDEBAR_W)
         {
@@ -787,13 +794,6 @@ public class PlayerScreen extends Screen
             }
             return super.mouseClicked(mx, my, btn);
         }
-
-        // 进度条
-        if (mx >= progBarX - 4 && mx <= progBarX + progBarW + 4 && my >= progBarY - 4 && my <= progBarY + 8)
-        { progDrag = true; seekMouse(mx); return true; }
-        // 音量条
-        if (mx >= volBarX - 4 && mx <= volBarX + volBarW + 4 && my >= volBarY - 4 && my <= volBarY + 8)
-        { volDrag = true; volMouse(mx); return true; }
 
         // 底部控制按钮
         int by = this.height - CONTROL_H + 22;
