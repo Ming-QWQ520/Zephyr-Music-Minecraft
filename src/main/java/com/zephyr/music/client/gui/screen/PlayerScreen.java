@@ -75,14 +75,19 @@ public class PlayerScreen extends Screen
         searchBox = new EditBox(this.font, SIDEBAR_W + 12, 12, this.width - SIDEBAR_W - 130, 16, Component.literal(""));
         searchBox.setHint(Component.literal("搜索歌曲/歌手..."));
         searchBox.setMaxLength(64);
-        searchBox.visible = (currentTab == Tab.SEARCH);
+        // ★ 搜索框和按钮只在搜索Tab显示
+        boolean showSearch = (currentTab == Tab.SEARCH);
+        searchBox.visible = showSearch;
         addRenderableWidget(searchBox);
 
-        // 搜索按钮
-        addRenderableWidget(Button.builder(Component.literal("搜索"), b -> doSearch())
-                .bounds(this.width - 110, 10, 50, 18).build());
-        addRenderableWidget(Button.builder(Component.literal("▶下一首"), b -> addSelectedToNext())
-                .bounds(this.width - 56, 10, 48, 18).build());
+        // ★ 搜索按钮和下一首按钮只在搜索Tab显示
+        if (showSearch)
+        {
+            addRenderableWidget(Button.builder(Component.literal("搜索"), b -> doSearch())
+                    .bounds(this.width - 110, 10, 50, 18).build());
+            addRenderableWidget(Button.builder(Component.literal("▶下一首"), b -> addSelectedToNext())
+                    .bounds(this.width - 56, 10, 48, 18).build());
+        }
 
         // ★ 预计算进度条位置（避免 mouseClicked 使用旧值）
         progBarX = SIDEBAR_W + 20;
@@ -916,19 +921,34 @@ public class PlayerScreen extends Screen
 
     private void toggleSetting(int adjY, int adjX, int contentW)
     {
-        // ★ HUD 设置项从 y=36+20=56 开始（标题占20px），每项18px
+        // ★ HUD 设置项从 y=20 开始（跳过标题），每项18px
+        // 后面还有歌词/通用/补充项，全部支持
         int startY = 20; // 相对于 y=36 的偏移，跳过标题行
         int itemH = 18;
-        for (int i = 0; i < 10; i++)
+
+        // 所有设置项列表（与 drawSettings 渲染顺序一致）
+        // 0-9: HUD 设置 (10项)
+        // 10-11: 歌词设置 (2项)
+        // 12-13: 通用设置 (2项)
+        // 14-21: 补充设置 (8项)
+        int totalItems = 22;
+
+        for (int i = 0; i < totalItems; i++)
         {
-            int itemY = startY + i * itemH;
+            // 跳过标题行（在 i=0 之前有标题，i=10 前有+8间距+标题20，i=12 前有+8+20，i=14 前有+18）
+            int extraOffset = 0;
+            if (i >= 10) extraOffset += 8 + 20; // 歌词标题
+            if (i >= 12) extraOffset += 8 + 20; // 通用标题
+            if (i >= 14) extraOffset += 18 * 0;  // 补充项紧跟通用
+
+            int itemY = startY + i * itemH + extraOffset;
             if (adjY >= itemY && adjY < itemY + itemH)
             {
-                // ★ 滑块项：点击滑块区域拖动调节
-                if (i >= 6) // 面板宽度/封面大小/歌词行数/音量
+                // 滑块项：面板宽度(6)/封面大小(7)/歌词行数(8)/音量(9)
+                if (i >= 6 && i <= 9)
                 {
-                    int sliderX = 100; // 相对于 contentX 的偏移
-                    int sliderW = contentW - 120; // 滑块宽度
+                    int sliderX = 100;
+                    int sliderW = contentW - 120;
                     if (adjX >= sliderX && adjX <= sliderX + sliderW)
                     {
                         double ratio = (double)(adjX - sliderX) / sliderW;
@@ -943,7 +963,7 @@ public class PlayerScreen extends Screen
                         return;
                     }
                 }
-                // ★ 非滑块项或点击右侧值区域：切换开关
+                // 非滑块项或点击右侧值区域：切换开关
                 if (adjX > contentW / 2)
                 {
                     switch (i)
@@ -958,6 +978,30 @@ public class PlayerScreen extends Screen
                         case 7: ZephyrConfig.HUD_COVER_SIZE.set(Math.min(256, ZephyrConfig.HUD_COVER_SIZE.get() + 16)); break;
                         case 8: ZephyrConfig.HUD_LYRICS_LINES.set(Math.min(12, ZephyrConfig.HUD_LYRICS_LINES.get() + 1)); break;
                         case 9: ZephyrConfig.HUD_VOLUME.set(Math.min(1.0, ZephyrConfig.HUD_VOLUME.get() + 0.1)); break;
+                        case 10: ZephyrConfig.LYRIC_KARAOKE.set(!ZephyrConfig.LYRIC_KARAOKE.get()); break;
+                        case 11: // 歌词模式切换
+                            String mode = ZephyrConfig.LYRIC_MODE.get();
+                            ZephyrConfig.LYRIC_MODE.set("yrc".equals(mode) ? "lrc" : "off".equals(mode) ? "yrc" : "off");
+                            break;
+                        case 12: // 音质切换
+                            String q = ZephyrConfig.DEFAULT_QUALITY.get();
+                            ZephyrConfig.DEFAULT_QUALITY.set("standard".equals(q) ? "higher" : "higher".equals(q) ? "exhigh" : "exhigh".equals(q) ? "lossless" : "lossless".equals(q) ? "hires" : "standard");
+                            break;
+                        case 13: ZephyrConfig.SCROBBLE_ENABLED.set(!ZephyrConfig.SCROBBLE_ENABLED.get()); break;
+                        case 14: ZephyrConfig.LYRIC_SCROLL.set(!ZephyrConfig.LYRIC_SCROLL.get()); break;
+                        case 15: ZephyrConfig.HUD_SHOW_BORDER.set(!ZephyrConfig.HUD_SHOW_BORDER.get()); break;
+                        case 16: // 背景透明度 +
+                            ZephyrConfig.HUD_BG_OPACITY.set(Math.min(1.0, ZephyrConfig.HUD_BG_OPACITY.get() + 0.1));
+                            break;
+                        case 17: // HUD锚点切换
+                            String a = ZephyrConfig.HUD_ANCHOR.get();
+                            String[] anchors = {"top_left", "top_right", "bottom_left", "bottom_right"};
+                            int ai = 0; for (int j = 0; j < 4; j++) if (anchors[j].equals(a)) ai = j;
+                            ZephyrConfig.HUD_ANCHOR.set(anchors[(ai + 1) % 4]);
+                            break;
+                        case 18: // 歌词字号 +
+                            ZephyrConfig.LYRIC_FONT_SIZE.set(Math.min(16, ZephyrConfig.LYRIC_FONT_SIZE.get() + 1));
+                            break;
                     }
                 }
                 return;
