@@ -42,3 +42,15 @@ config/zephyrmusic-client.toml
 
 # Forge MDK extras
 forge*changelog.txt
+
+# ---- Agent system local artifacts (never commit) ----
+skills/
+node_modules/
+worklog.md
+agent-ctx/
+scripts/
+tool-results/
+upload/
+download/
+.env
+.env.*
