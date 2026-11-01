@@ -8,6 +8,7 @@ import com.zephyr.music.api.NeteaseSession;
 import com.zephyr.music.api.NeteaseUser;
 import com.zephyr.music.client.audio.CoverTextureManager;
 import com.zephyr.music.client.gui.ModernUI;
+import com.zephyr.music.config.ZephyrConfig;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
@@ -78,7 +79,7 @@ public class AccountScreen extends Screen
         // 不绘制默认泥土背景
         // renderBackground(g);
         int cx = this.width / 2;
-        final int COLOR_ACCENT = 0xFF00FFFF;
+        final int COLOR_ACCENT = ZephyrConfig.getAccentColor();
         final int COLOR_TEXT = 0xFFFFFFFF;
         final int COLOR_DIM = 0xFFAAAAAA;
         final int COLOR_PANEL = 0xE0452A1F;

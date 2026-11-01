@@ -3,6 +3,7 @@ package com.zephyr.music.client.gui.screen;
 import com.zephyr.music.api.NeteaseSong;
 import com.zephyr.music.client.audio.MusicPlayer;
 import com.zephyr.music.client.gui.ModernUI;
+import com.zephyr.music.config.ZephyrConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -65,13 +66,13 @@ public class QueueScreen extends Screen
         if (queue.isEmpty())
         {
             g.drawCenteredString(this.font, Component.literal("播放队列为空"), cx, this.height / 2 - 10, 0xFFAAAAAA);
-            g.drawCenteredString(this.font, Component.literal("从歌单或搜索中添加歌曲"), cx, this.height / 2 + 6, 0xFF888888);
+            g.drawCenteredString(this.font, Component.literal("从歌单或搜索中添加歌曲"), cx, this.height / 2 + 6, ModernUI.TEXT_DIM);
         }
         else
         {
             queueList.render(g, mouseX, mouseY, partialTick);
         }
-        g.drawCenteredString(this.font, Component.literal("Enter播放 · Del移除 · N下一首 · C清空"), cx, this.height - 22, 0xFF888888);
+        g.drawCenteredString(this.font, Component.literal("Enter播放 · Del移除 · N下一首 · C清空"), cx, this.height - 22, ModernUI.TEXT_DIM);
         super.render(g, mouseX, mouseY, partialTick);
     }
 
@@ -81,7 +82,7 @@ public class QueueScreen extends Screen
         QueueList.Entry selected = (queueList != null) ? queueList.getSelected() : null;
         if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER)
         {
-            if (selected != null) { MusicPlayer.getInstance().jumpTo(selected.index); statusMessage = "正在播放: " + selected.song.name; statusColor = 0xFF00FFFF; }
+            if (selected != null) { MusicPlayer.getInstance().jumpTo(selected.index); statusMessage = "正在播放: " + selected.song.name; statusColor = ZephyrConfig.getAccentColor(); }
             return true;
         }
         else if (keyCode == GLFW.GLFW_KEY_DELETE || keyCode == GLFW.GLFW_KEY_BACKSPACE)
@@ -91,7 +92,7 @@ public class QueueScreen extends Screen
         }
         else if (keyCode == GLFW.GLFW_KEY_N)
         {
-            if (selected != null) { MusicPlayer mp = MusicPlayer.getInstance(); mp.playNext(selected.song); statusMessage = "下一首: " + selected.song.name; statusColor = 0xFF00FFFF; rebuildList(); }
+            if (selected != null) { MusicPlayer mp = MusicPlayer.getInstance(); mp.playNext(selected.song); statusMessage = "下一首: " + selected.song.name; statusColor = ZephyrConfig.getAccentColor(); rebuildList(); }
             return true;
         }
         else if (keyCode == GLFW.GLFW_KEY_C) { clearQueue(); return true; }
@@ -127,17 +128,17 @@ public class QueueScreen extends Screen
                 boolean isCurrent = (index == mp.getQueueIndex());
                 boolean isPlaying = isCurrent && mp.isPlaying() && !mp.isPaused();
                 boolean isSelected = (QueueList.this.getSelected() == this);
-                if (isSelected) ModernUI.fillRound(g, left, top, width, height, 4, 0x3000FFFF);
-                if (isCurrent) { ModernUI.fillRound(g, left, top, width, height, 4, 0x40000000); g.fill(left, top + 2, left + 3, top + height - 2, 0xFF00FFFF); }
+                if (isSelected) ModernUI.fillRound(g, left, top, width, height, 4, ModernUI.withAlpha(ZephyrConfig.getAccentColor(), 0x30));
+                if (isCurrent) { ModernUI.fillRound(g, left, top, width, height, 4, 0x40000000); g.fill(left, top + 2, left + 3, top + height - 2, ZephyrConfig.getAccentColor()); }
                 else if (hovering) ModernUI.fillRound(g, left, top, width, height, 4, 0x20FFFFFF);
                 int textLeft = left + 10;
                 String prefix = isCurrent ? (isPlaying ? "▶" : "⏸") : String.valueOf(index + 1);
-                int prefixColor = isCurrent ? 0xFF00FFFF : 0xFF888888;
+                int prefixColor = isCurrent ? ZephyrConfig.getAccentColor() : ModernUI.TEXT_DIM;
                 g.drawString(QueueScreen.this.font, Component.literal(prefix), textLeft, top + 4, prefixColor, false);
                 String title = song.name; if (title.length() > 35) title = title.substring(0, 34) + "…";
                 g.drawString(QueueScreen.this.font, Component.literal(title), textLeft + 24, top + 4, isCurrent ? 0xFFFFFFFF : 0xFFDDDDDD, false);
                 String meta = song.getDisplayArtist() + " · " + song.getDisplayDuration(); if (meta.length() > 50) meta = meta.substring(0, 49) + "…";
-                g.drawString(QueueScreen.this.font, Component.literal(meta), textLeft + 24, top + 15, 0xFF888888, false);
+                g.drawString(QueueScreen.this.font, Component.literal(meta), textLeft + 24, top + 15, ModernUI.TEXT_DIM, false);
             }
 
             @Override
@@ -146,7 +147,7 @@ public class QueueScreen extends Screen
                 QueueList.this.setSelected(this);
                 if (button == 1) { String name = song.name; MusicPlayer.getInstance().removeFromQueue(index); statusMessage = "已移除: " + name; statusColor = 0xFFFFAA00; rebuildList(); return true; }
                 long now = System.currentTimeMillis();
-                if (now - lastClickTime < 400) { MusicPlayer.getInstance().jumpTo(index); statusMessage = "正在播放: " + song.name; statusColor = 0xFF00FFFF; }
+                if (now - lastClickTime < 400) { MusicPlayer.getInstance().jumpTo(index); statusMessage = "正在播放: " + song.name; statusColor = ZephyrConfig.getAccentColor(); }
                 lastClickTime = now;
                 return true;
             }

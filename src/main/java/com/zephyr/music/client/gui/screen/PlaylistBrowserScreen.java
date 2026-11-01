@@ -98,7 +98,14 @@ public class PlaylistBrowserScreen extends Screen
                     }
                     else
                     {
-                        loadingMessage = "未登录，请先点击右上角[账号/登录]";
+                        // ★ 按登录态细分提示：失效(有cookie被拒) vs 网络异常 vs 真未登录
+                        NeteaseSession.LoginState st = NeteaseSession.getInstance().getLoginState();
+                        if (st == NeteaseSession.LoginState.INVALID)
+                            loadingMessage = "登录态已失效，请到【账号】页重新登录";
+                        else if (st == NeteaseSession.LoginState.UNKNOWN)
+                            loadingMessage = "网络异常，无法获取歌单，可点击右侧【账号】重试";
+                        else
+                            loadingMessage = "未登录，请先点击右上角[账号/登录]";
                         state = ViewState.LIST_PLAYLISTS;
                         playlists = Collections.emptyList();
                         minecraft.execute(() -> { clearWidgets(); init(); });

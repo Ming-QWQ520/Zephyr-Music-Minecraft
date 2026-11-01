@@ -103,6 +103,15 @@ public class NeteaseApi
         return http.get("/login/status");
     }
 
+    /**
+     * 刷新登录态（续期 MUSIC_U）。
+     * cookie 过期但未失效时返回 code=200 和新 cookie，可据此自动恢复登录。
+     */
+    public CompletableFuture<JsonObject> loginRefresh()
+    {
+        return http.get("/login/refresh");
+    }
+
     /** 退出登录 */
     public CompletableFuture<JsonObject> logout()
     {

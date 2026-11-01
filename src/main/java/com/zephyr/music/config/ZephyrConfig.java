@@ -130,21 +130,21 @@ public class ZephyrConfig
         LYRIC_FONT_SIZE = BUILDER.defineInRange("lyric_font_size", 9, 6, 16);
         // AllMusic 风格：当前歌词青色，其他歌词浅灰
         LYRIC_ACTIVE_COLOR = BUILDER.comment("Active line color (ARGB int)")
-                .defineInRange("lyric_active_color", 0xFF00FFFF, Integer.MIN_VALUE, Integer.MAX_VALUE);
+                .defineInRange("lyric_active_color", 0xFFFF5C8A, Integer.MIN_VALUE, Integer.MAX_VALUE);
         LYRIC_OTHER_COLOR = BUILDER.defineInRange("lyric_other_color", 0xFFCCCCCC, Integer.MIN_VALUE, Integer.MAX_VALUE);
-        LYRIC_WORD_PLAYED_COLOR = BUILDER.defineInRange("lyric_word_played_color", 0xFF00FFFF, Integer.MIN_VALUE, Integer.MAX_VALUE);
+        LYRIC_WORD_PLAYED_COLOR = BUILDER.defineInRange("lyric_word_played_color", 0xFFFF5C8A, Integer.MIN_VALUE, Integer.MAX_VALUE);
         LYRIC_WORD_CURRENT_COLOR = BUILDER.defineInRange("lyric_word_current_color", 0xFF80FFFF, Integer.MIN_VALUE, Integer.MAX_VALUE);
         LYRIC_WORD_UNPLAYED_COLOR = BUILDER.defineInRange("lyric_word_unplayed_color", 0xFF888888, Integer.MIN_VALUE, Integer.MAX_VALUE);
         BUILDER.pop();
 
         BUILDER.push("theme");
-        // AllMusic 风格：青色主题 + 木质背景
+        // 借鉴 DangoMusic：iOS 深色模式 + 粉色强调色（Dango 品牌粉 #FF5C8A）
         THEME_PRIMARY = BUILDER.comment("Primary theme color (hex)")
-                .define("theme_primary", "#00FFFF");
+                .define("theme_primary", "#FF5C8A");
         THEME_ACCENT = BUILDER.comment("Accent theme color (hex)")
-                .define("theme_accent", "#00FFFF");
+                .define("theme_accent", "#FF5C8A");
         THEME_BG = BUILDER.comment("Background theme color (hex)")
-                .define("theme_bg", "#2A1F12");
+                .define("theme_bg", "#17171A");
         BUILDER.pop();
 
         SPEC = BUILDER.build();

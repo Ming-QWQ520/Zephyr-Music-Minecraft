@@ -156,7 +156,7 @@ public class MusicHudOverlay implements IGuiOverlay
         {
             String hint = "HUD 编辑模式：拖动面板 / F8 保存";
             g.fill(0, screenHeight - 14, screenWidth, screenHeight, 0x90000000);
-            g.drawCenteredString(mc.font, Component.literal(hint), screenWidth / 2, screenHeight - 11, 0xFF4FC3F7);
+            g.drawCenteredString(mc.font, Component.literal(hint), screenWidth / 2, screenHeight - 11, ZephyrConfig.getAccentColor());
         }
     }
 
@@ -317,7 +317,7 @@ public class MusicHudOverlay implements IGuiOverlay
     {
         boolean hovered = hoverId == id;
         buttonRects[id][0] = x; buttonRects[id][1] = y; buttonRects[id][2] = 16; buttonRects[id][3] = 12;
-        ModernUI.fillRound(g, x, y, 16, 12, 4, active ? 0xFF2E4A66 : (hovered ? 0xFF33405A : 0x30FFFFFF));
+        ModernUI.fillRound(g, x, y, 16, 12, 4, active ? ModernUI.withAlpha(ZephyrConfig.getAccentColor(), 40) : (hovered ? ModernUI.CARD_HOVER : ModernUI.CARD));
         g.drawCenteredString(Minecraft.getInstance().font, Component.literal(label),
                 x + 8, y + 2, active ? ModernUI.TEXT_ACCENT : ModernUI.TEXT_SECONDARY);
     }
@@ -477,7 +477,7 @@ public class MusicHudOverlay implements IGuiOverlay
             RenderSystem.disableBlend();
             // 圆角裁切遮罩（四个角上盖玻璃色小方块，视觉圆角化）
             int corner = 4;
-            int mask = 0x9910141C;
+            int mask = 0x99131316;
             g.fill(x, y, x + corner, y + 1, mask); g.fill(x, y + 1, x + 1, y + corner, mask);
             g.fill(x + size - corner, y, x + size, y + 1, mask); g.fill(x + size - 1, y + 1, x + size, y + corner, mask);
             g.fill(x, y + size - 1, x + corner, y + size, mask); g.fill(x, y + size - corner, x + 1, y + size - 1, mask);
@@ -491,10 +491,10 @@ public class MusicHudOverlay implements IGuiOverlay
 
     private void renderCoverPlaceholder(GuiGraphics g, int x, int y, int size, String text)
     {
-        ModernUI.fillRound(g, x, y, size, size, 8, 0xFF1A222E);
+        ModernUI.fillRound(g, x, y, size, size, 8, 0xFF1C1C20);
         Minecraft mc = Minecraft.getInstance();
         int tw = mc.font.width(text);
-        g.drawString(mc.font, Component.literal(text), x + (size - tw) / 2, y + size / 2 - 4, 0xFF888888, false);
+        g.drawString(mc.font, Component.literal(text), x + (size - tw) / 2, y + size / 2 - 4, ModernUI.TEXT_DIM, false);
     }
 
     private void renderKaraokeLine(GuiGraphics g, Minecraft mc, LyricLine line, int x, int y, int maxW, double pos)

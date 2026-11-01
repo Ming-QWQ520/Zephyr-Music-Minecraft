@@ -14,22 +14,31 @@ import net.minecraft.client.gui.components.EditBox;
  */
 public class ModernUI
 {
-    // ================= 设计 tokens（毛玻璃主题） =================
-    /** 面板玻璃底色（深色玻璃，alpha 由浓度控制） */
-    public static final int GLASS_DARK = 0xB4141820;
+    // ================= 设计 tokens（※借鉴 DangoMusic 液态玻璃主题：iOS 深色模式系统色） =================
+    /** 面板玻璃底色（中性深色玻璃，不再偏蓝） */
+    public static final int GLASS_DARK = 0xB4161619;
     /** 面板玻璃底色（浅一层，用于内嵌卡片） */
-    public static final int GLASS_CARD = 0x8C1A1F2A;
+    public static final int GLASS_CARD = 0x8C1E1E22;
     /** 面板玻璃底色（悬浮 HUD） */
-    public static final int GLASS_HUD = 0x9910141C;
+    public static final int GLASS_HUD = 0x99131316;
     /** 1px 亮边 */
     public static final int BORDER_LIGHT = 0x50FFFFFF;
-    /** 文字层级 */
-    public static final int TEXT_PRIMARY = 0xFFF2F5FA;
-    public static final int TEXT_SECONDARY = 0xFFA8B3C4;
-    public static final int TEXT_DIM = 0xFF6B7484;
-    public static final int TEXT_ACCENT = 0xFF4FC3F7;
-    public static final int TEXT_SUCCESS = 0xFF5AD492;
-    public static final int TEXT_DANGER = 0xFFFF6666;
+    /** 文字层级（iOS 深色模式：主 96% / 次 62% / 弱 38%） */
+    public static final int TEXT_PRIMARY = 0xF5FFFFFF;
+    public static final int TEXT_SECONDARY = 0x9EFFFFFF;
+    public static final int TEXT_DIM = 0x61FFFFFF;
+    public static final int TEXT_ACCENT = 0xFFFF5C8A;
+    public static final int TEXT_SUCCESS = 0xFF30D158;
+    public static final int TEXT_DANGER = 0xFFFF453A;
+
+    /** 卡片底色（白色 5.5%，DangoMusic Theme.CARD 同款） */
+    public static final int CARD = 0x0EFFFFFF;
+    /** 卡片悬停（白色 8.5%） */
+    public static final int CARD_HOVER = 0x16FFFFFF;
+    /** 发丝分隔线（白色 8%） */
+    public static final int HAIRLINE = 0x14FFFFFF;
+    /** 滑条轨道灰（Theme.TRACK） */
+    public static final int TRACK = 0x4D787880;
 
     /** 控件悬停底色 */
     public static final int HOVER_FILL = 0x28FFFFFF;
@@ -121,17 +130,17 @@ public class ModernUI
     {
         int color;
         if (active) color = withAlpha(ZephyrConfig.getAccentColor(), 255);
-        else if (hovered) color = 0xFF2E3E52;
-        else color = 0xFF232936;
+        else if (hovered) color = CARD_HOVER;
+        else color = CARD;
         fillRound(g, x, y, w, h, radius, color);
-        strokeRound(g, x, y, w, h, radius, hovered ? 0x80FFFFFF : 0x30FFFFFF, 1);
+        strokeRound(g, x, y, w, h, radius, hovered ? 0x50FFFFFF : HAIRLINE, 1);
     }
 
     /** 圆角进度条（填充 + 圆头滑块） */
     public static void drawProgressBar(GuiGraphics g, int x, int y, int w, int h, double progress)
     {
         progress = Math.max(0, Math.min(1, progress));
-        fillRound(g, x, y, w, h, h / 2, 0xFF2A3140);
+        fillRound(g, x, y, w, h, h / 2, TRACK);
         if (progress > 0)
         {
             int fw = (int) ((w - 2) * progress);
@@ -145,14 +154,57 @@ public class ModernUI
         fillRound(g, sx, y + h / 2 - 3, 6, 6, 3, 0xFFFFFFFF);
     }
 
+    /** 细轨道进度条（DangoMusic 样式：灰轨道 + 强调色填充，无滑块） */
+    public static void drawThinBar(GuiGraphics g, int x, int y, int w, int h, double progress)
+    {
+        progress = Math.max(0, Math.min(1, progress));
+        fillRound(g, x, y, w, h, h / 2, TRACK);
+        int fw = (int) Math.max(progress > 0 ? h : 0, w * progress);
+        if (fw > 0) fillRound(g, x, y, fw, h, h / 2, ZephyrConfig.getAccentColor());
+    }
+
     /** 开关控件（toggle） */
     public static void drawToggle(GuiGraphics g, int x, int y, boolean on, boolean hovered)
     {
         int w = 28, h = 12;
-        int bg = on ? withAlpha(ZephyrConfig.getAccentColor(), 200) : (hovered ? 0xFF3A4252 : 0xFF2A3140);
+        int bg = on ? withAlpha(ZephyrConfig.getAccentColor(), 200) : (hovered ? 0xFF3A3A40 : 0x4D787880);
         fillRound(g, x, y, w, h, h / 2, bg);
         int knobX = on ? x + w - h + 1 : x + 1;
-        fillRound(g, knobX, y + 1, h - 2, h - 2, (h - 2) / 2, on ? 0xFFFFFFFF : 0xFF9AA4B2);
+        fillRound(g, knobX, y + 1, h - 2, h - 2, (h - 2) / 2, on ? 0xFFFFFFFF : 0xFF9A9AA0);
+    }
+
+    /**
+     * iOS 风格大开关（借鉴 DangoMusic 设置页：开启时强调色、白色圆形滑块）
+     * @return 控件宽度
+     */
+    public static int drawIosToggle(GuiGraphics g, int x, int y, boolean on, boolean hovered)
+    {
+        int w = 32, h = 16;
+        int accent = ZephyrConfig.getAccentColor();
+        int bg = on ? withAlpha(accent, hovered ? 255 : 235) : (hovered ? 0x5C787880 : TRACK);
+        fillRound(g, x, y, w, h, h / 2, bg);
+        int knob = h - 4;
+        int knobX = on ? x + w - knob - 2 : x + 2;
+        fillRound(g, knobX, y + 2, knob, knob, knob / 2, 0xFFFFFFFF);
+        return w;
+    }
+
+    /** 强调色胶囊按钮（DangoMusic "Play all" 样式：强调色底 + 白字） */
+    public static void drawPillButton(GuiGraphics g, int x, int y, int w, int h, String label, boolean hovered, boolean accentFill)
+    {
+        int accent = ZephyrConfig.getAccentColor();
+        if (accentFill)
+        {
+            fillRound(g, x, y, w, h, h / 2, hovered ? withAlpha(accent, 255) : withAlpha(accent, 225));
+        }
+        else
+        {
+            fillRound(g, x, y, w, h, h / 2, hovered ? CARD_HOVER : CARD);
+            strokeRound(g, x, y, w, h, h / 2, hovered ? 0x30FFFFFF : HAIRLINE, 1);
+        }
+        g.drawCenteredString(net.minecraft.client.Minecraft.getInstance().font,
+                net.minecraft.network.chat.Component.literal(label), x + w / 2, y + (h - 8) / 2,
+                accentFill ? 0xFFFFFFFF : TEXT_PRIMARY);
     }
 
     /** 编辑框底座 */
