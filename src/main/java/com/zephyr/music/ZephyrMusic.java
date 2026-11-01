@@ -26,7 +26,7 @@ public class ZephyrMusic
 {
     public static final String MODID = "zephyrmusic";
     public static final String NAME = "Zephyr Music";
-    public static final String VERSION = "1.0.0";
+    public static final String VERSION = "2.0.0";
     public static final Logger LOGGER = LogUtils.getLogger();
 
     public ZephyrMusic(FMLJavaModLoadingContext context)
@@ -57,7 +57,11 @@ public class ZephyrMusic
         {
             event.enqueueWork(() -> {
                 ClientEventHandler.register();
-                LOGGER.info("[Zephyr Music] Client setup complete");
+                // ★ 游戏退出时释放 OpenAL 资源（device/context/effect）
+                Runtime.getRuntime().addShutdownHook(new Thread(
+                        () -> com.zephyr.music.client.audio.MusicPlayer.getInstance().shutdown(),
+                        "ZephyrMusic-Shutdown"));
+                LOGGER.info("[Zephyr Music] Client setup complete (v2.0.0 glass UI + OpenAL)");
             });
         }
     }

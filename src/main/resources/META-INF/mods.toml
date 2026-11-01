@@ -1,15 +1,15 @@
 modLoader="javafml"
 loaderVersion="[47,)"
-license="AGPL-3.0"
+license="GPL-3.0"
 # Client-side only mod
 clientSideOnly=true
 
 [[mods]]
 modId="zephyrmusic"
-version="1.0.0"
+version="2.0.0"
 displayName="Zephyr Music"
 authors="ZephyrStudio"
-description='Play NetEase Cloud Music in Minecraft. Features QR/SMS/Email login, playlist browsing, in-game HUD with lyrics, and full GUI controls.'
+description='Play NetEase Cloud Music in Minecraft. v2: frosted-glass UI with SDF rounded panels and one-shot background blur, floating glass HUD with clickable controls, OpenAL audio output with optional cave reverb (EFX), shuffle/loop modes, full player GUI.'
 
 [[dependencies.zephyrmusic]]
     modId="forge"

@@ -5,7 +5,9 @@ import com.zephyr.music.ZephyrMusic;
 import com.zephyr.music.api.*;
 import com.zephyr.music.client.audio.CoverTextureManager;
 import com.zephyr.music.client.audio.MusicPlayer;
+import com.zephyr.music.client.glass.BlurManager;
 import com.zephyr.music.client.gui.ModernUI;
+import com.zephyr.music.client.hud.MusicHudOverlay;
 import com.zephyr.music.config.ZephyrConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -71,6 +73,9 @@ public class PlayerScreen extends Screen
     @Override
     protected void init()
     {
+        // ★ 毛玻璃：界面打开时对背后世界抓取一次模糊（面板静态，不逐帧模糊）
+        BlurManager.requestBlur();
+
         // 搜索框
         searchBox = new EditBox(this.font, SIDEBAR_W + 12, 12, this.width - SIDEBAR_W - 130, 16, Component.literal(""));
         searchBox.setHint(Component.literal("搜索歌曲/歌手..."));
@@ -323,7 +328,10 @@ public class PlayerScreen extends Screen
     public void render(GuiGraphics g, int mx, int my, float delta)
     {
         this.mouseX = mx; this.mouseY = my;
-        // 不绘制默认背景
+        BlurManager.runPending();
+
+        // ★ 毛玻璃背景：模糊后的世界画面 + 暗色蒙版（不再使用原生黑色渐变背景）
+        drawGlassBackdrop(g);
 
         // 搜索框可见性
         searchBox.visible = (currentTab == Tab.SEARCH);
@@ -353,16 +361,31 @@ public class PlayerScreen extends Screen
         super.render(g, mx, my, delta);
     }
 
+    /** 毛玻璃全屏背景：模糊图（若有）+ 暗色蒙版 */
+    private void drawGlassBackdrop(GuiGraphics g)
+    {
+        if (BlurManager.hasBlur())
+        {
+            // 直接把整屏模糊图铺底（对齐世界画面，形成毛玻璃观感）
+            BlurManager.drawBlurredRegion(0, 0, this.width, this.height);
+        }
+        g.fillGradient(0, 0, this.width, this.height, 0x880E1218, 0xB40E1218);
+    }
+
     // === 左侧边栏 ===
     private void drawSidebar(GuiGraphics g)
     {
-        g.fill(0, 0, SIDEBAR_W, this.height, 0xFF1B1D24);
-        g.fill(SIDEBAR_W - 1, 0, SIDEBAR_W, this.height, 0xFF2E3240);
-        g.drawCenteredString(this.font, Component.literal("Zephyr"), SIDEBAR_W / 2, 8, 0xFF4FC3F7);
+        // 玻璃侧边栏
+        ModernUI.glassPanel(g, 0, 0, SIDEBAR_W, this.height, 0, ModernUI.GLASS_DARK, 0.5f, true);
+        g.fill(SIDEBAR_W - 1, 0, SIDEBAR_W, this.height, 0x40FFFFFF);
+
+        // 品牌标识
+        g.drawCenteredString(this.font, Component.literal("Zephyr"), SIDEBAR_W / 2, 9, ModernUI.TEXT_ACCENT);
+        g.drawCenteredString(this.font, Component.literal("MUSIC"), SIDEBAR_W / 2, 19, 0xFF5A6B82);
 
         Tab[] tabs = Tab.values();
         String[] labels = {"歌词", "歌单", "搜索", "队列", "设置", "账号"};
-        int y = 34;
+        int y = 40;
         for (int i = 0; i < tabs.length; i++)
         {
             int x1 = 6, y1 = y, x2 = SIDEBAR_W - 6, y2 = y + 30;
@@ -377,9 +400,19 @@ public class PlayerScreen extends Screen
                 else
                     label = "登录";
             }
-            if (selected) g.fill(x1, y1, x2, y2, 0xFF2A3A52);
-            else if (hovered) g.fill(x1, y1, x2, y2, 0xFF23262F);
-            g.drawCenteredString(this.font, Component.literal(label), (x1 + x2) / 2, y1 + (30 - 8) / 2, selected ? 0xFF4FC3F7 : 0xFFCCCCCC);
+            if (selected)
+            {
+                // 选中态：强调色胶囊 + 左侧亮条
+                ModernUI.fillRound(g, x1, y1, x2 - x1, y2 - y1, 8, 0xFF24384F);
+                ModernUI.strokeRound(g, x1, y1, x2 - x1, y2 - y1, 8, 0x504FC3F7, 1);
+                g.fill(2, y1 + 6, 4, y2 - 6, 0xFF4FC3F7);
+            }
+            else if (hovered)
+            {
+                ModernUI.fillRound(g, x1, y1, x2 - x1, y2 - y1, 8, 0x30FFFFFF);
+            }
+            g.drawCenteredString(this.font, Component.literal(label), (x1 + x2) / 2, y1 + (30 - 8) / 2,
+                    selected ? ModernUI.TEXT_ACCENT : ModernUI.TEXT_SECONDARY);
             y += 34;
         }
     }
@@ -504,106 +537,213 @@ public class PlayerScreen extends Screen
     }
 
     // === 设置页 ===
-    private void drawSettings(GuiGraphics g)
+    // ==================================================================
+    //  设置页（数据驱动，分组渲染）
+    // ==================================================================
+
+    private static class SettingItem
     {
-        int x = SIDEBAR_W + 12, y = 36;
-        int cw = this.width - SIDEBAR_W - 24;
-        int accent = 0xFF4FC3F7, text = 0xFFFFFFFF, dim = 0xFF888888;
+        final String name;
+        final java.util.function.Supplier<String> value;
+        final boolean slider;
+        final java.util.function.Supplier<Double> ratio;
+        final java.util.function.DoubleConsumer onSlide;
+        final Runnable onClick;
 
-        g.drawString(this.font, Component.literal("─── HUD ───"), x, y, accent, false); y += 20;
-        // 设置项: 名称, 值, 是否是滑块(面板宽度/封面大小/歌词行数/音量)
-        Object[][] items = {
-            {"启用HUD", ZephyrConfig.HUD_ENABLED.get() ? "ON" : "OFF", false},
-            {"显示封面", ZephyrConfig.HUD_SHOW_COVER.get() ? "ON" : "OFF", false},
-            {"显示进度条", ZephyrConfig.HUD_SHOW_PROGRESS_BAR.get() ? "ON" : "OFF", false},
-            {"显示歌词", ZephyrConfig.HUD_SHOW_LYRICS.get() ? "ON" : "OFF", false},
-            {"菜单时暂停", ZephyrConfig.HUD_PAUSE_ON_MENU.get() ? "ON" : "OFF", false},
-            {"紧凑模式", ZephyrConfig.HUD_COMPACT.get() ? "ON" : "OFF", false},
-            {"面板宽度", String.valueOf(ZephyrConfig.HUD_PANEL_WIDTH.get()), true},
-            {"封面大小", String.valueOf(ZephyrConfig.HUD_COVER_SIZE.get()), true},
-            {"歌词行数", String.valueOf(ZephyrConfig.HUD_LYRICS_LINES.get()), true},
-            {"音量", String.format("%.0f%%", ZephyrConfig.HUD_VOLUME.get() * 100), true},
-        };
-        for (int i = 0; i < items.length; i++)
-        {
-            String name = (String)items[i][0];
-            String val = (String)items[i][1];
-            boolean isSlider = (boolean)items[i][2];
-            boolean hv = mouseX >= x && mouseX <= x + cw && mouseY >= y - 2 + scroll && mouseY <= y + 16 + scroll;
-            if (hv) g.fill(x - 4, y - 2, x + cw, y + 16, 0xFF23262F);
-            g.drawString(this.font, Component.literal(name), x, y, text, false);
-            int vw = this.font.width(val);
-            int valX = x + cw - vw - 12;
-            g.fill(valX, y - 1, x + cw, y + 12, 0xFF2E3240);
-            g.drawString(this.font, Component.literal(val), valX + 6, y, accent, false);
-            // ★ 滑块项绘制进度条
-            if (isSlider)
-            {
-                int sliderX = x + 100;
-                int sliderW = valX - sliderX - 6;
-                if (sliderW > 20)
-                {
-                    double ratio = 0;
-                    if (name.contains("面板宽度")) ratio = (ZephyrConfig.HUD_PANEL_WIDTH.get() - 100) / 500.0;
-                    else if (name.contains("封面大小")) ratio = (ZephyrConfig.HUD_COVER_SIZE.get() - 16) / 240.0;
-                    else if (name.contains("歌词行数")) ratio = (ZephyrConfig.HUD_LYRICS_LINES.get() - 1) / 11.0;
-                    else if (name.contains("音量")) ratio = ZephyrConfig.HUD_VOLUME.get();
-                    ratio = Math.max(0, Math.min(1, ratio));
-                    g.fill(sliderX, y + 5, sliderX + sliderW, y + 8, 0xFF444444);
-                    int fw2 = (int)(sliderW * ratio);
-                    g.fill(sliderX, y + 5, sliderX + fw2, y + 8, accent);
-                    g.fill(sliderX + fw2 - 1, y + 3, sliderX + fw2 + 3, y + 10, accent);
-                }
-            }
-            y += 18;
-        }
-        y += 8;
-        g.drawString(this.font, Component.literal("─── 歌词 ───"), x, y, accent, false); y += 20;
-        String[][] litems = {{"卡拉OK", ZephyrConfig.LYRIC_KARAOKE.get() ? "ON" : "OFF"}, {"歌词模式", ZephyrConfig.LYRIC_MODE.get()}};
-        for (String[] item : litems)
-        {
-            boolean hv = mouseX >= x && mouseX <= x + cw && mouseY >= y - 2 + scroll && mouseY <= y + 16 + scroll;
-            if (hv) g.fill(x - 4, y - 2, x + cw, y + 16, 0xFF23262F);
-            g.drawString(this.font, Component.literal(item[0]), x, y, text, false);
-            g.drawString(this.font, Component.literal(item[1]), x + cw - 60, y, accent, false);
-            y += 18;
-        }
-        y += 8;
-        g.drawString(this.font, Component.literal("─── 通用 ───"), x, y, accent, false); y += 20;
-        g.drawString(this.font, Component.literal("音质"), x, y, text, false);
-        g.drawString(this.font, Component.literal(ZephyrConfig.DEFAULT_QUALITY.get()), x + cw - 60, y, accent, false); y += 18;
-        g.drawString(this.font, Component.literal("打卡"), x, y, text, false);
-        g.drawString(this.font, Component.literal(ZephyrConfig.SCROBBLE_ENABLED.get() ? "ON" : "OFF"), x + cw - 60, y, accent, false);
-        y += 18;
-        // ★ 增加缺失的配置项
-        g.drawString(this.font, Component.literal("API地址"), x, y, text, false);
-        String apiBase = ZephyrConfig.API_BASE.get();
-        if (apiBase.length() > 30) apiBase = apiBase.substring(0, 29) + "…";
-        g.drawString(this.font, Component.literal(apiBase), x + cw - 120, y, accent, false); y += 18;
-        g.drawString(this.font, Component.literal("歌词字号"), x, y, text, false);
-        g.drawString(this.font, Component.literal(String.valueOf(ZephyrConfig.LYRIC_FONT_SIZE.get())), x + cw - 60, y, accent, false); y += 18;
-        g.drawString(this.font, Component.literal("歌词滚动"), x, y, text, false);
-        g.drawString(this.font, Component.literal(ZephyrConfig.LYRIC_SCROLL.get() ? "ON" : "OFF"), x + cw - 60, y, accent, false); y += 18;
-        g.drawString(this.font, Component.literal("边框"), x, y, text, false);
-        g.drawString(this.font, Component.literal(ZephyrConfig.HUD_SHOW_BORDER.get() ? "ON" : "OFF"), x + cw - 60, y, accent, false); y += 18;
-        g.drawString(this.font, Component.literal("背景透明度"), x, y, text, false);
-        g.drawString(this.font, Component.literal(String.format("%.0f%%", ZephyrConfig.HUD_BG_OPACITY.get() * 100)), x + cw - 60, y, accent, false); y += 18;
-        g.drawString(this.font, Component.literal("HUD锚点"), x, y, text, false);
-        g.drawString(this.font, Component.literal(ZephyrConfig.HUD_ANCHOR.get()), x + cw - 80, y, accent, false); y += 18;
-        g.drawString(this.font, Component.literal("主题色"), x, y, text, false);
-        g.drawString(this.font, Component.literal(ZephyrConfig.THEME_PRIMARY.get()), x + cw - 80, y, accent, false); y += 18;
-        g.drawString(this.font, Component.literal("背景色"), x, y, text, false);
-        g.drawString(this.font, Component.literal(ZephyrConfig.THEME_BG.get()), x + cw - 80, y, accent, false); y += 18;
+        SettingItem(String name, java.util.function.Supplier<String> value, Runnable onClick)
+        { this(name, value, null, null, null); }
 
-        // ★ 设置滚动上限
-        int contentH = this.height - CONTROL_H - 36;
-        int totalH = y - 36 + 20;
-        scrollMax = Math.max(0, totalH - contentH);
-        if (scroll > scrollMax) scroll = scrollMax;
-        if (scroll < 0) scroll = 0;
+        SettingItem(String name, java.util.function.Supplier<String> value,
+                    java.util.function.Supplier<Double> ratio, java.util.function.DoubleConsumer onSlide,
+                    Runnable unusedClick)
+        {
+            this.name = name; this.value = value;
+            this.slider = ratio != null; this.ratio = ratio; this.onSlide = onSlide; this.onClick = null;
+        }
     }
 
-    // === 账号/登录页 ===
+    private static class SettingSection
+    {
+        final String title;
+        final java.util.List<SettingItem> items = new ArrayList<>();
+        SettingSection(String t) { title = t; }
+    }
+
+    private final java.util.List<SettingSection> settingSections = buildSettingSections();
+
+    private static java.util.List<SettingSection> buildSettingSections()
+    {
+        java.util.List<SettingSection> out = new ArrayList<>();
+        MusicPlayer mp = MusicPlayer.getInstance();
+
+        SettingSection play = new SettingSection("播放");
+        play.items.add(new SettingItem("洞穴混响",
+                () -> ZephyrConfig.PLAYBACK_CAVE_REVERB.get() ? "ON" : "OFF",
+                () -> { boolean v = !ZephyrConfig.PLAYBACK_CAVE_REVERB.get();
+                        ZephyrConfig.PLAYBACK_CAVE_REVERB.set(v); mp.setCaveReverb(v); }));
+        play.items.add(new SettingItem("随机播放",
+                () -> mp.isShuffleMode() ? "ON" : "OFF",
+                () -> mp.setShuffleMode(!mp.isShuffleMode())));
+        play.items.add(new SettingItem("单曲循环",
+                () -> mp.isLoopMode() ? "ON" : "OFF",
+                () -> mp.setLoopMode(!mp.isLoopMode())));
+        play.items.add(new SettingItem("音质",
+                () -> ZephyrConfig.DEFAULT_QUALITY.get(),
+                () -> { String q = ZephyrConfig.DEFAULT_QUALITY.get();
+                        ZephyrConfig.DEFAULT_QUALITY.set("standard".equals(q) ? "higher" : "higher".equals(q) ? "exhigh" : "exhigh".equals(q) ? "lossless" : "lossless".equals(q) ? "hires" : "standard"); }));
+        play.items.add(new SettingItem("音量",
+                () -> String.format("%d%%", (int) (ZephyrConfig.HUD_VOLUME.get() * 100)),
+                () -> ZephyrConfig.HUD_VOLUME.get(),
+                r -> { ZephyrConfig.HUD_VOLUME.set(r); mp.setVolume((float) r); }, null));
+        play.items.add(new SettingItem("听歌打卡",
+                () -> ZephyrConfig.SCROBBLE_ENABLED.get() ? "ON" : "OFF",
+                () -> ZephyrConfig.SCROBBLE_ENABLED.set(!ZephyrConfig.SCROBBLE_ENABLED.get())));
+        out.add(play);
+
+        SettingSection hud = new SettingSection("HUD");
+        hud.items.add(new SettingItem("显示 HUD",
+                () -> ZephyrConfig.HUD_ENABLED.get() ? "ON" : "OFF",
+                () -> ZephyrConfig.HUD_ENABLED.set(!ZephyrConfig.HUD_ENABLED.get())));
+        hud.items.add(new SettingItem("悬浮面板模式",
+                () -> ZephyrConfig.HUD_FLOAT_MODE.get() ? "ON" : "OFF",
+                () -> ZephyrConfig.HUD_FLOAT_MODE.set(!ZephyrConfig.HUD_FLOAT_MODE.get())));
+        hud.items.add(new SettingItem("面板控制键",
+                () -> ZephyrConfig.HUD_FLOAT_CONTROLS.get() ? "ON" : "OFF",
+                () -> ZephyrConfig.HUD_FLOAT_CONTROLS.set(!ZephyrConfig.HUD_FLOAT_CONTROLS.get())));
+        hud.items.add(new SettingItem("编辑模式",
+                () -> "按 F8",
+                () -> { MusicHudOverlay.toggleEditMode(); }));
+        hud.items.add(new SettingItem("显示封面",
+                () -> ZephyrConfig.HUD_SHOW_COVER.get() ? "ON" : "OFF",
+                () -> ZephyrConfig.HUD_SHOW_COVER.set(!ZephyrConfig.HUD_SHOW_COVER.get())));
+        hud.items.add(new SettingItem("显示进度条",
+                () -> ZephyrConfig.HUD_SHOW_PROGRESS_BAR.get() ? "ON" : "OFF",
+                () -> ZephyrConfig.HUD_SHOW_PROGRESS_BAR.set(!ZephyrConfig.HUD_SHOW_PROGRESS_BAR.get())));
+        hud.items.add(new SettingItem("显示歌词",
+                () -> ZephyrConfig.HUD_SHOW_LYRICS.get() ? "ON" : "OFF",
+                () -> ZephyrConfig.HUD_SHOW_LYRICS.set(!ZephyrConfig.HUD_SHOW_LYRICS.get())));
+        hud.items.add(new SettingItem("歌词行数",
+                () -> String.valueOf(ZephyrConfig.HUD_LYRICS_LINES.get()),
+                () -> (ZephyrConfig.HUD_LYRICS_LINES.get() - 1) / 11.0,
+                r -> ZephyrConfig.HUD_LYRICS_LINES.set((int) Math.round(1 + r * 11)), null));
+        hud.items.add(new SettingItem("面板宽度",
+                () -> String.valueOf(ZephyrConfig.HUD_PANEL_WIDTH.get()),
+                () -> (ZephyrConfig.HUD_PANEL_WIDTH.get() - 100) / 500.0,
+                r -> ZephyrConfig.HUD_PANEL_WIDTH.set((int) Math.round(100 + r * 500)), null));
+        hud.items.add(new SettingItem("封面大小",
+                () -> String.valueOf(ZephyrConfig.HUD_COVER_SIZE.get()),
+                () -> (ZephyrConfig.HUD_COVER_SIZE.get() - 16) / 240.0,
+                r -> ZephyrConfig.HUD_COVER_SIZE.set((int) Math.round(16 + r * 240)), null));
+        hud.items.add(new SettingItem("锚点",
+                () -> ZephyrConfig.HUD_ANCHOR.get(),
+                () -> { String[] a = {"top_left", "top_right", "bottom_left", "bottom_right"};
+                        int i = 0; for (int j = 0; j < 4; j++) if (a[j].equals(ZephyrConfig.HUD_ANCHOR.get())) i = j;
+                        ZephyrConfig.HUD_ANCHOR.set(a[(i + 1) % 4]); }));
+        hud.items.add(new SettingItem("菜单打开时暂停",
+                () -> ZephyrConfig.HUD_PAUSE_ON_MENU.get() ? "ON" : "OFF",
+                () -> ZephyrConfig.HUD_PAUSE_ON_MENU.set(!ZephyrConfig.HUD_PAUSE_ON_MENU.get())));
+        out.add(hud);
+
+        SettingSection ui = new SettingSection("界面 · 毛玻璃");
+        ui.items.add(new SettingItem("背景模糊",
+                () -> ZephyrConfig.UI_GLASS_BLUR.get() ? "ON" : "OFF",
+                () -> { ZephyrConfig.UI_GLASS_BLUR.set(!ZephyrConfig.UI_GLASS_BLUR.get()); BlurManager.invalidate(); }));
+        ui.items.add(new SettingItem("模糊强度",
+                () -> "×" + ZephyrConfig.UI_BLUR_STRENGTH.get(),
+                () -> (ZephyrConfig.UI_BLUR_STRENGTH.get() - 1) / 3.0,
+                r -> { ZephyrConfig.UI_BLUR_STRENGTH.set((int) Math.round(1 + r * 3)); BlurManager.invalidate(); }, null));
+        ui.items.add(new SettingItem("经典背景不透明度",
+                () -> String.format("%d%%", (int) (ZephyrConfig.HUD_BG_OPACITY.get() * 100)),
+                () -> ZephyrConfig.HUD_BG_OPACITY.get(),
+                r -> ZephyrConfig.HUD_BG_OPACITY.set(r), null));
+        ui.items.add(new SettingItem("经典边框",
+                () -> ZephyrConfig.HUD_SHOW_BORDER.get() ? "ON" : "OFF",
+                () -> ZephyrConfig.HUD_SHOW_BORDER.set(!ZephyrConfig.HUD_SHOW_BORDER.get())));
+        out.add(ui);
+
+        SettingSection lyric = new SettingSection("歌词");
+        lyric.items.add(new SettingItem("卡拉OK 逐字",
+                () -> ZephyrConfig.LYRIC_KARAOKE.get() ? "ON" : "OFF",
+                () -> ZephyrConfig.LYRIC_KARAOKE.set(!ZephyrConfig.LYRIC_KARAOKE.get())));
+        lyric.items.add(new SettingItem("歌词模式",
+                () -> ZephyrConfig.LYRIC_MODE.get(),
+                () -> { String m = ZephyrConfig.LYRIC_MODE.get();
+                        ZephyrConfig.LYRIC_MODE.set("yrc".equals(m) ? "lrc" : "lrc".equals(m) ? "off" : "yrc"); }));
+        lyric.items.add(new SettingItem("字号",
+                () -> String.valueOf(ZephyrConfig.LYRIC_FONT_SIZE.get()),
+                () -> (ZephyrConfig.LYRIC_FONT_SIZE.get() - 6) / 10.0,
+                r -> ZephyrConfig.LYRIC_FONT_SIZE.set((int) Math.round(6 + r * 10)), null));
+        out.add(lyric);
+
+        SettingSection misc = new SettingSection("通用");
+        misc.items.add(new SettingItem("API 地址",
+                () -> { String b = ZephyrConfig.API_BASE.get();
+                        return b.length() > 26 ? b.substring(0, 25) + "…" : b; },
+                () -> { }));
+        out.add(misc);
+        return out;
+    }
+
+    private void drawSettings(GuiGraphics g)
+    {
+        int x = SIDEBAR_W + 14, y = 36;
+        int cw = this.width - SIDEBAR_W - 28;
+        int accent = ModernUI.TEXT_ACCENT;
+
+        int rowH = 20;
+        int headerH = 22;
+        int totalH = 0;
+        for (SettingSection s : settingSections) totalH += headerH + s.items.size() * rowH + 6;
+        scrollMax = Math.max(0, totalH - (this.height - CONTROL_H - 44));
+        double s0 = Math.max(0, Math.min(scroll, scrollMax));
+
+        g.enableScissor(SIDEBAR_W, 36, this.width, this.height - CONTROL_H);
+        double sy = y - s0;
+        for (SettingSection sec : settingSections)
+        {
+            // 分组标题（强调色小圆点 + 文本 + 细线）
+            g.drawString(this.font, Component.literal("● " + sec.title), x, (int) sy, accent, false);
+            g.fill(x + this.font.width(sec.title) + 16, (int) sy + 4, x + cw, (int) sy + 5, 0x28FFFFFF);
+            sy += headerH;
+            for (SettingItem item : sec.items)
+            {
+                int iy = (int) sy;
+                boolean hovered = mouseX >= x && mouseX <= x + cw && mouseY >= iy && mouseY <= iy + rowH - 2;
+                if (hovered) ModernUI.fillRound(g, x - 6, iy - 2, cw + 12, rowH, 6, 0x20FFFFFF);
+                g.drawString(this.font, Component.literal(item.name), x, iy + 2, ModernUI.TEXT_SECONDARY, false);
+                String val = item.value.get();
+                if (item.slider)
+                {
+                    // 滑块行：左值右滑条
+                    g.drawString(this.font, Component.literal(val), x + 96, iy + 2, ModernUI.TEXT_PRIMARY, false);
+                    int slX = x + 140, slW = Math.max(40, x + cw - slX);
+                    double ratio = item.ratio.get();
+                    ratio = Math.max(0, Math.min(1, ratio));
+                    // 保存滑块命中区（供点击设置）
+                    sliderHit[0] = slX; sliderHit[1] = iy - 2; sliderHit[2] = slW; sliderHit[3] = rowH;
+                    ModernUI.drawProgressBar(g, slX, iy + 5, slW, 4, ratio);
+                    // 值即 ratio 已画，跳过右侧标签
+                }
+                else
+                {
+                    boolean isOn = "ON".equals(val);
+                    int vw = this.font.width(val);
+                    int pillW = Math.max(34, vw + 16);
+                    ModernUI.fillRound(g, x + cw - pillW, iy, pillW, 14, 7,
+                            isOn ? 0xFF24405C : 0x30FFFFFF);
+                    g.drawCenteredString(this.font, Component.literal(val), x + cw - pillW / 2, iy + 3,
+                            isOn ? ModernUI.TEXT_ACCENT : ModernUI.TEXT_DIM);
+                    sliderHit[0] = 0; sliderHit[2] = 0;
+                }
+                lastSettingItem[0] = System.identityHashCode(item);
+                sy += rowH;
+            }
+            sy += 6;
+        }
+        g.disableScissor();
+        if (scroll > scrollMax) scroll = scrollMax;
+    }
+
     private void drawAccount(GuiGraphics g)
     {
         int contentW = this.width - SIDEBAR_W;
@@ -727,23 +867,31 @@ public class PlayerScreen extends Screen
     }
 
     // === 歌曲行（带封面缩略图）===
+
+    // === 歌曲行（带封面缩略图）===
     private void drawSongRow(GuiGraphics g, NeteaseSong song, int y, int contentX, int contentW)
     {
         if (y < 8 || y > this.height - CONTROL_H - 8) return;
         boolean hv = mouseX >= contentX + 4 && mouseX <= this.width - 4 && mouseY >= y && mouseY <= y + ROW_H;
-        if (hv) g.fill(contentX + 4, y, this.width - 4, y + ROW_H, 0xFF23262F);
+        NeteaseSong curSong = MusicPlayer.getInstance().getCurrentSong();
+        boolean isCurrent = curSong != null && curSong.id == song.id;
+        if (hv || isCurrent)
+        {
+            ModernUI.fillRound(g, contentX + 4, y, this.width - contentX - 8, ROW_H, 8,
+                    isCurrent ? 0xFF22384E : 0x28FFFFFF);
+        }
         // 封面缩略图
-        renderCover(g, song.picUrl, contentX + 8, y + 2, 32);
+        renderCover(g, song.picUrl, contentX + 10, y + 2, 32);
         // 标题
         String title = trunc(song.name, 40);
-        g.drawString(this.font, Component.literal(title), contentX + 48, y + 4, 0xFFFFFFFF, false);
+        g.drawString(this.font, Component.literal(title), contentX + 50, y + 4,
+                isCurrent ? ModernUI.TEXT_ACCENT : ModernUI.TEXT_PRIMARY, false);
         // 副标题
         String sub = trunc(song.getDisplayArtist() + " · " + song.getDisplayDuration(), 40);
-        g.drawString(this.font, Component.literal(sub), contentX + 48, y + 18, 0xFF999999, false);
+        g.drawString(this.font, Component.literal(sub), contentX + 50, y + 18, ModernUI.TEXT_DIM, false);
         // 当前播放标记
-        NeteaseSong cur = MusicPlayer.getInstance().getCurrentSong();
-        if (cur != null && cur.id == song.id)
-            g.drawString(this.font, Component.literal("▶"), contentX + 48 + this.font.width(title) + 6, y + 4, 0xFF4FC3F7, false);
+        if (isCurrent)
+            g.drawString(this.font, Component.literal("♪"), contentX + 50 + this.font.width(title) + 6, y + 4, ModernUI.TEXT_ACCENT, false);
     }
 
     // === 底部控制条 ===
@@ -753,55 +901,61 @@ public class PlayerScreen extends Screen
         NeteaseSong song = p.getCurrentSong();
         int y = this.height - CONTROL_H;
         int cx2 = SIDEBAR_W, cw = this.width - SIDEBAR_W;
-        // 背景
-        g.fill(cx2, y, this.width, this.height, 0xFF17181D);
-        g.fill(cx2, y, this.width, y + 1, 0xFF2E3240);
+        // 玻璃背景
+        ModernUI.glassPanel(g, cx2, y, cw, CONTROL_H, 0, ModernUI.GLASS_DARK, 0.55f, true);
+        g.fill(cx2, y, this.width, y + 1, 0x40FFFFFF);
 
-        // 进度条
+        // 进度条（SDF 圆角 + 滑块，可拖拽 seek）
         double pos = p.getPositionSec();
         double total = song != null && song.duration > 0 ? song.duration / 1000.0 : 0;
         double prog = total > 0 ? Math.min(1, pos / total) : 0;
-        int barX = cx2 + 20, barW = cw - 40, barY = y + 6;
-        progBarX = barX; progBarY = barY; progBarW = barW;
-        g.fill(barX, barY, barX + barW, barY + 4, 0xFF444444);
-        int filled = (int)(barW * prog);
-        g.fill(barX, barY, barX + filled, barY + 4, 0xFF4FC3F7);
-        // 滑块
-        g.fill(barX + filled - 1, barY - 2, barX + filled + 3, barY + 6, 0xFF4FC3F7);
-        // 时间
-        String time = fmtTime(pos) + " / " + fmtTime(total);
-        g.drawString(this.font, Component.literal(time), barX + barW - this.font.width(time), barY + 6, 0xFF999999, false);
+        String t1 = fmtTime(pos), t2 = fmtTime(total);
+        int t1w = this.font.width(t1), t2w = this.font.width(t2);
+        int barX = cx2 + 24 + t1w + 8;
+        int barW = Math.max(40, cw - 40 - t1w - t2w - 32);
+        int barY = y + 9;
+        progBarX = barX; progBarY = barY - 4; progBarW = barW;
+        g.drawString(this.font, Component.literal(t1), cx2 + 24, barY - 1, ModernUI.TEXT_ACCENT, false);
+        ModernUI.drawProgressBar(g, barX, barY, barW, 4, prog);
+        g.drawString(this.font, Component.literal(t2), barX + barW + 8, barY - 1, ModernUI.TEXT_DIM, false);
 
-        // 按钮行
-        int by = y + 22;
-        drawCtrlBtn(g, "⏮", cx2 + 20, by, () -> p.prev());
-        drawCtrlBtn(g, p.isPaused() ? "▶" : "⏸", cx2 + 56, by, () -> { if (p.isPlaying()) { if (p.isPaused()) p.resume(); else p.pause(); } });
-        drawCtrlBtn(g, "⏭", cx2 + 92, by, () -> p.next());
-        drawCtrlBtn(g, p.isLoopMode() ? "🔁" : "➡", cx2 + 128, by, () -> p.setLoopMode(!p.isLoopMode()));
+        // 按钮行（玻璃按钮 + 随机/循环）
+        int by = y + 24;
+        boolean hovered;
+        hovered = mouseX >= cx2 + 20 && mouseX <= cx2 + 50 && mouseY >= by - 2 && mouseY <= by + 20;
+        drawCtrlBtn(g, "⏮", cx2 + 20, by, hovered, false);
+        hovered = mouseX >= cx2 + 54 && mouseX <= cx2 + 84 && mouseY >= by - 2 && mouseY <= by + 20;
+        drawCtrlBtn(g, p.isPaused() ? "▶" : "⏸", cx2 + 54, by, hovered, true);
+        hovered = mouseX >= cx2 + 88 && mouseX <= cx2 + 118 && mouseY >= by - 2 && mouseY <= by + 20;
+        drawCtrlBtn(g, "⏭", cx2 + 88, by, hovered, false);
+        hovered = mouseX >= cx2 + 122 && mouseX <= cx2 + 152 && mouseY >= by - 2 && mouseY <= by + 20;
+        drawCtrlBtn(g, "🔀", cx2 + 122, by, hovered, p.isShuffleMode());
+        hovered = mouseX >= cx2 + 156 && mouseX <= cx2 + 186 && mouseY >= by - 2 && mouseY <= by + 20;
+        drawCtrlBtn(g, "🔁", cx2 + 156, by, hovered, p.isLoopMode());
 
-        // 音量
+        // 音量滑条
         float vol = p.getVolume();
-        drawCtrlBtn(g, "−", cx2 + 180, by, () -> p.setVolume(vol - 0.1f));
-        volBarX = cx2 + 210; volBarY = by + 9; volBarW = 80;
-        g.fill(volBarX, volBarY, volBarX + volBarW, volBarY + 4, 0xFF444444);
-        g.fill(volBarX, volBarY, volBarX + (int)(volBarW * vol), volBarY + 4, 0xFF4FC3F7);
-        drawCtrlBtn(g, "+", cx2 + 296, by, () -> p.setVolume(vol + 0.1f));
-        g.drawString(this.font, Component.literal(Math.round(vol * 100) + "%"), cx2 + 260, by + 8, 0xFFAAAAAA, false);
+        g.drawString(this.font, Component.literal("♪"), cx2 + 196, by + 6, ModernUI.TEXT_SECONDARY, false);
+        volBarX = cx2 + 210; volBarY = by + 8; volBarW = 90;
+        ModernUI.drawProgressBar(g, volBarX, volBarY, volBarW, 4, vol);
+        g.drawString(this.font, Component.literal(Math.round(vol * 100) + "%"),
+                volBarX + volBarW + 6, by + 6, ModernUI.TEXT_DIM, false);
 
-        // 歌曲名
-        String now = song != null ? trunc(song.name + " - " + song.getDisplayArtist(), 50) : "未在播放";
-        g.drawString(this.font, Component.literal(now), cx2 + 340, by + 8, 0xFFCCCCCC, false);
+        // 歌曲名（右侧）
+        int titleMaxW = Math.max(20, this.width - (cx2 + 348));
+        String now = song != null ? trunc(song.name + " - " + song.getDisplayArtist(), titleMaxW) : "未在播放";
+        g.drawString(this.font, Component.literal(now), this.width - this.font.width(now) - 10, by + 6, ModernUI.TEXT_SECONDARY, false);
     }
 
-    private void drawCtrlBtn(GuiGraphics g, String label, int x, int y, Runnable action)
+    private void drawCtrlBtn(GuiGraphics g, String label, int x, int y, boolean hovered, boolean active)
     {
-        boolean hv = mouseX >= x && mouseX <= x + 30 && mouseY >= y && mouseY <= y + 20;
-        if (hv) g.fill(x, y, x + 30, y + 20, 0xFF2E3240);
-        g.drawCenteredString(this.font, Component.literal(label), x + 15, y + 6, 0xFFDDDDDD);
+        int bg = active ? 0xFF2E4A66 : (hovered ? 0xFF33405A : 0x24FFFFFF);
+        ModernUI.fillRound(g, x, y, 30, 18, 6, bg);
+        if (active) ModernUI.strokeRound(g, x, y, 30, 18, 6, 0x704FC3F7, 1);
+        g.drawCenteredString(this.font, Component.literal(label), x + 15, y + 5,
+                active ? ModernUI.TEXT_ACCENT : (hovered ? ModernUI.TEXT_PRIMARY : ModernUI.TEXT_SECONDARY));
     }
 
-    // === 鼠标交互 ===
-    @Override
     public boolean mouseClicked(double mx, double my, int btn)
     {
         // ★ 进度条检查放在最前面（优先级最高）
@@ -814,7 +968,7 @@ public class PlayerScreen extends Screen
         // 侧边栏 Tab
         if (mx < SIDEBAR_W)
         {
-            int ty = 34;
+            int ty = 40;
             Tab[] tabs = Tab.values();
             for (int i = 0; i < tabs.length; i++)
             {
@@ -825,16 +979,15 @@ public class PlayerScreen extends Screen
         }
 
         // 底部控制按钮
-        int by = this.height - CONTROL_H + 22;
-        if (my >= by && my <= by + 20)
+        int by = this.height - CONTROL_H + 24;
+        if (my >= by - 2 && my <= by + 20)
         {
             int cx2 = SIDEBAR_W;
             if (mx >= cx2 + 20 && mx <= cx2 + 50) { MusicPlayer.getInstance().prev(); return true; }
-            if (mx >= cx2 + 56 && mx <= cx2 + 86) { MusicPlayer p = MusicPlayer.getInstance(); if (p.isPlaying()) { if (p.isPaused()) p.resume(); else p.pause(); } return true; }
-            if (mx >= cx2 + 92 && mx <= cx2 + 122) { MusicPlayer.getInstance().next(); return true; }
-            if (mx >= cx2 + 128 && mx <= cx2 + 158) { MusicPlayer p = MusicPlayer.getInstance(); p.setLoopMode(!p.isLoopMode()); return true; }
-            if (mx >= cx2 + 180 && mx <= cx2 + 210) { MusicPlayer p = MusicPlayer.getInstance(); p.setVolume(p.getVolume() - 0.1f); return true; }
-            if (mx >= cx2 + 296 && mx <= cx2 + 326) { MusicPlayer p = MusicPlayer.getInstance(); p.setVolume(p.getVolume() + 0.1f); return true; }
+            if (mx >= cx2 + 54 && mx <= cx2 + 84) { MusicPlayer p = MusicPlayer.getInstance(); if (p.isPlaying()) { if (p.isPaused()) p.resume(); else p.pause(); } return true; }
+            if (mx >= cx2 + 88 && mx <= cx2 + 118) { MusicPlayer.getInstance().next(); return true; }
+            if (mx >= cx2 + 122 && mx <= cx2 + 152) { MusicPlayer p = MusicPlayer.getInstance(); p.setShuffleMode(!p.isShuffleMode()); return true; }
+            if (mx >= cx2 + 156 && mx <= cx2 + 186) { MusicPlayer p = MusicPlayer.getInstance(); p.setLoopMode(!p.isLoopMode()); return true; }
         }
 
         // 右侧内容区点击
@@ -919,93 +1072,38 @@ public class PlayerScreen extends Screen
         return super.mouseClicked(mx, my, btn);
     }
 
+    /** 最近渲染的滑块命中区 {x,y,w,h}，0 宽表示无 */
+    private final int[] sliderHit = new int[4];
+    private final int[] lastSettingItem = new int[1];
+
     private void toggleSetting(int adjY, int adjX, int contentW)
     {
-        // ★ HUD 设置项从 y=20 开始（跳过标题），每项18px
-        // 后面还有歌词/通用/补充项，全部支持
-        int startY = 20; // 相对于 y=36 的偏移，跳过标题行
-        int itemH = 18;
-
-        // 所有设置项列表（与 drawSettings 渲染顺序一致）
-        // 0-9: HUD 设置 (10项)
-        // 10-11: 歌词设置 (2项)
-        // 12-13: 通用设置 (2项)
-        // 14-21: 补充设置 (8项)
-        int totalItems = 22;
-
-        for (int i = 0; i < totalItems; i++)
+        // 与 drawSettings 相同的布局从上往下数
+        int rowH = 20, headerH = 22;
+        double s0 = Math.max(0, Math.min(scroll, scrollMax));
+        double sy = 36 - s0;
+        for (SettingSection sec : settingSections)
         {
-            // 跳过标题行（在 i=0 之前有标题，i=10 前有+8间距+标题20，i=12 前有+8+20，i=14 前有+18）
-            int extraOffset = 0;
-            if (i >= 10) extraOffset += 8 + 20; // 歌词标题
-            if (i >= 12) extraOffset += 8 + 20; // 通用标题
-            if (i >= 14) extraOffset += 18 * 0;  // 补充项紧跟通用
-
-            int itemY = startY + i * itemH + extraOffset;
-            if (adjY >= itemY && adjY < itemY + itemH)
+            sy += headerH;
+            for (SettingItem item : sec.items)
             {
-                // 滑块项：面板宽度(6)/封面大小(7)/歌词行数(8)/音量(9)
-                if (i >= 6 && i <= 9)
+                int iy = (int) sy;
+                if (adjY >= iy - 2 && adjY < iy + rowH - 2)
                 {
-                    int sliderX = 100;
-                    int sliderW = contentW - 120;
-                    if (adjX >= sliderX && adjX <= sliderX + sliderW)
+                    if (item.slider && sliderHit[2] > 0 && adjX >= sliderHit[0] && adjX <= sliderHit[0] + sliderHit[2])
                     {
-                        double ratio = (double)(adjX - sliderX) / sliderW;
-                        ratio = Math.max(0, Math.min(1, ratio));
-                        switch (i)
-                        {
-                            case 6: ZephyrConfig.HUD_PANEL_WIDTH.set((int)(100 + ratio * 500)); break;
-                            case 7: ZephyrConfig.HUD_COVER_SIZE.set((int)(16 + ratio * 240)); break;
-                            case 8: ZephyrConfig.HUD_LYRICS_LINES.set((int)(1 + ratio * 11)); break;
-                            case 9: ZephyrConfig.HUD_VOLUME.set(ratio); break;
-                        }
-                        return;
+                        double ratio = (double) (adjX - sliderHit[0]) / sliderHit[2];
+                        item.onSlide.accept(Math.max(0, Math.min(1, ratio)));
                     }
-                }
-                // 非滑块项或点击右侧值区域：切换开关
-                if (adjX > contentW / 2)
-                {
-                    switch (i)
+                    else if (item.onClick != null)
                     {
-                        case 0: ZephyrConfig.HUD_ENABLED.set(!ZephyrConfig.HUD_ENABLED.get()); break;
-                        case 1: ZephyrConfig.HUD_SHOW_COVER.set(!ZephyrConfig.HUD_SHOW_COVER.get()); break;
-                        case 2: ZephyrConfig.HUD_SHOW_PROGRESS_BAR.set(!ZephyrConfig.HUD_SHOW_PROGRESS_BAR.get()); break;
-                        case 3: ZephyrConfig.HUD_SHOW_LYRICS.set(!ZephyrConfig.HUD_SHOW_LYRICS.get()); break;
-                        case 4: ZephyrConfig.HUD_PAUSE_ON_MENU.set(!ZephyrConfig.HUD_PAUSE_ON_MENU.get()); break;
-                        case 5: ZephyrConfig.HUD_COMPACT.set(!ZephyrConfig.HUD_COMPACT.get()); break;
-                        case 6: ZephyrConfig.HUD_PANEL_WIDTH.set(Math.min(600, ZephyrConfig.HUD_PANEL_WIDTH.get() + 20)); break;
-                        case 7: ZephyrConfig.HUD_COVER_SIZE.set(Math.min(256, ZephyrConfig.HUD_COVER_SIZE.get() + 16)); break;
-                        case 8: ZephyrConfig.HUD_LYRICS_LINES.set(Math.min(12, ZephyrConfig.HUD_LYRICS_LINES.get() + 1)); break;
-                        case 9: ZephyrConfig.HUD_VOLUME.set(Math.min(1.0, ZephyrConfig.HUD_VOLUME.get() + 0.1)); break;
-                        case 10: ZephyrConfig.LYRIC_KARAOKE.set(!ZephyrConfig.LYRIC_KARAOKE.get()); break;
-                        case 11: // 歌词模式切换
-                            String mode = ZephyrConfig.LYRIC_MODE.get();
-                            ZephyrConfig.LYRIC_MODE.set("yrc".equals(mode) ? "lrc" : "off".equals(mode) ? "yrc" : "off");
-                            break;
-                        case 12: // 音质切换
-                            String q = ZephyrConfig.DEFAULT_QUALITY.get();
-                            ZephyrConfig.DEFAULT_QUALITY.set("standard".equals(q) ? "higher" : "higher".equals(q) ? "exhigh" : "exhigh".equals(q) ? "lossless" : "lossless".equals(q) ? "hires" : "standard");
-                            break;
-                        case 13: ZephyrConfig.SCROBBLE_ENABLED.set(!ZephyrConfig.SCROBBLE_ENABLED.get()); break;
-                        case 14: ZephyrConfig.LYRIC_SCROLL.set(!ZephyrConfig.LYRIC_SCROLL.get()); break;
-                        case 15: ZephyrConfig.HUD_SHOW_BORDER.set(!ZephyrConfig.HUD_SHOW_BORDER.get()); break;
-                        case 16: // 背景透明度 +
-                            ZephyrConfig.HUD_BG_OPACITY.set(Math.min(1.0, ZephyrConfig.HUD_BG_OPACITY.get() + 0.1));
-                            break;
-                        case 17: // HUD锚点切换
-                            String a = ZephyrConfig.HUD_ANCHOR.get();
-                            String[] anchors = {"top_left", "top_right", "bottom_left", "bottom_right"};
-                            int ai = 0; for (int j = 0; j < 4; j++) if (anchors[j].equals(a)) ai = j;
-                            ZephyrConfig.HUD_ANCHOR.set(anchors[(ai + 1) % 4]);
-                            break;
-                        case 18: // 歌词字号 +
-                            ZephyrConfig.LYRIC_FONT_SIZE.set(Math.min(16, ZephyrConfig.LYRIC_FONT_SIZE.get() + 1));
-                            break;
+                        item.onClick.run();
                     }
+                    return;
                 }
-                return;
+                sy += rowH;
             }
+            sy += 6;
         }
     }
 

@@ -13,13 +13,6 @@ import javazoom.jl.decoder.Header;
 import javazoom.jl.decoder.JavaLayerException;
 import javazoom.jl.decoder.SampleBuffer;
 
-import javax.sound.sampled.AudioFormat;
-import javax.sound.sampled.AudioSystem;
-import javax.sound.sampled.DataLine;
-import javax.sound.sampled.FloatControl;
-import javax.sound.sampled.LineUnavailableException;
-import javax.sound.sampled.Mixer;
-import javax.sound.sampled.SourceDataLine;
 import java.io.BufferedInputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -34,16 +27,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 音频播放引擎 - 基于 JLayer 解码 + 直接使用 SourceDataLine 播放
+ * 音频播放引擎 - 基于 JLayer 解码 + OpenAL 流式输出
  *
- * ★ 关键修复（v4）：
- *   不再使用 JLayer 的 FactoryRegistry/JavaSoundAudioDevice（其内部 test() 会以
- *   22050Hz mono 测试播放，在不支持该格式的 audio mixer 上抛异常导致整个解码
- *   循环立即结束，没有声音也没有报错）。
- *   改为直接获取 SourceDataLine，用 MP3 解码后的实际格式（44100Hz stereo）打开。
+ * ★ v5（UI/UX 重构版）：
+ *   音频输出从 javax.sound.sampled.SourceDataLine（JavaSound）全面迁移到 OpenAL：
+ *   - 使用 Minecraft 自带 LWJGL OpenAL Soft（OpenAlOutput），无额外依赖
+ *   - 独立 ALC device/context，与 MC 声音引擎互不干扰
+ *   - 支持 EFX 洞穴混响（设置里可开关，默认关闭）
  *
  * - 支持从 URL 流式播放 MP3
- * - 后台线程解码 + SourceDataLine 播放
+ * - 后台线程解码 + OpenAL 缓冲队列播放
  * - 暴露播放进度（用于歌词同步）
  */
 public class MusicPlayer
@@ -56,9 +49,7 @@ public class MusicPlayer
     private volatile Thread playThread;
     private volatile Bitstream currentBitstream;
     private volatile Decoder currentDecoder;
-    private volatile SourceDataLine currentLine;
     private volatile HttpURLConnection currentConnection;
-    private volatile AudioFormat currentFormat;
 
     private final AtomicBoolean playing = new AtomicBoolean(false);
     private final AtomicBoolean paused = new AtomicBoolean(false);
@@ -69,12 +60,14 @@ public class MusicPlayer
 
     private volatile long playStartTimeMs = 0;
     private volatile double positionOffsetSec = 0;
-    private volatile long lineStartPosUs = 0;
     private volatile double lastReturnedPos = 0;
 
     private final List<NeteaseSong> queue = new CopyOnWriteArrayList<>();
     private volatile int queueIndex = -1;
     private volatile boolean loopMode = false;
+    private volatile boolean shuffleMode = false;
+    private volatile boolean outputOpened = false;
+    private final java.util.Random random = new java.util.Random();
 
     private MusicPlayer()
     {
@@ -131,37 +124,32 @@ public class MusicPlayer
 
     /**
      * ★ 获取当前播放位置（秒）
-     * 使用 SourceDataLine.getMicrosecondPosition() 获取实际音频播放位置
-     * 暂停时位置冻结，seek 时通过 positionOffsetSec 调整
+     * 使用 OpenAL 的样本偏移（SAMPLE_OFFSET + 已消费缓冲）精确计算；
+     * 暂停时位置冻结，seek 时通过 positionOffsetSec 调整。
      */
     public double getPositionSec()
     {
         if (paused.get())
         {
-            return positionOffsetSec;
+            return lastReturnedPos;
         }
-        SourceDataLine line = currentLine;
-        if (line != null && playing.get())
+        double outPos = OpenAlOutput.getInstance().getPositionSec();
+        if (outPos >= 0 && playing.get())
         {
-            try
+            double posSec = positionOffsetSec + outPos;
+            // 钳制到总时长
+            NeteaseSong song = currentSong.get();
+            if (song != null && song.duration > 0)
             {
-                long curPosUs = line.getMicrosecondPosition();
-                double posSec = positionOffsetSec + (curPosUs - lineStartPosUs) / 1_000_000.0;
-                // 钳制到总时长
-                NeteaseSong song = currentSong.get();
-                if (song != null && song.duration > 0)
-                {
-                    double total = song.duration / 1000.0;
-                    if (posSec > total) posSec = total;
-                }
-                // 单调递增保护
-                if (posSec < lastReturnedPos) return lastReturnedPos;
-                lastReturnedPos = posSec;
-                return posSec;
+                double total = song.duration / 1000.0;
+                if (posSec > total) posSec = total;
             }
-            catch (Exception ignored) {}
+            // 单调递增保护
+            if (posSec < lastReturnedPos) return lastReturnedPos;
+            lastReturnedPos = posSec;
+            return posSec;
         }
-        return positionOffsetSec;
+        return lastReturnedPos;
     }
 
     public float getVolume()
@@ -172,28 +160,26 @@ public class MusicPlayer
     public void setVolume(float v)
     {
         ZephyrConfig.HUD_VOLUME.set((double) Math.max(0, Math.min(1, v)));
-        applyVolumeToLine();
+        OpenAlOutput.getInstance().setVolume(getVolume());
     }
 
-    private void applyVolumeToLine()
+    /** 洞穴混响开关（转发给 OpenAL EFX） */
+    public void setCaveReverb(boolean on)
+    {
+        OpenAlOutput.getInstance().setReverb(on);
+    }
+
+    public boolean isCaveReverbAvailable()
+    {
+        return OpenAlOutput.getInstance().isReverbAvailable();
+    }
+
+    /** 按配置应用洞穴混响（在新流打开后调用） */
+    private void applyReverbSetting()
     {
         try
         {
-            SourceDataLine line = currentLine;
-            if (line != null && line.isControlSupported(FloatControl.Type.MASTER_GAIN))
-            {
-                FloatControl gain = (FloatControl) line.getControl(FloatControl.Type.MASTER_GAIN);
-                float vol = ZephyrConfig.HUD_VOLUME.get().floatValue();
-                if (vol <= 0)
-                {
-                    gain.setValue(gain.getMinimum());
-                }
-                else
-                {
-                    float dB = 20f * (float) Math.log10(Math.max(0.01, vol));
-                    gain.setValue(Math.max(gain.getMinimum(), Math.min(gain.getMaximum(), dB)));
-                }
-            }
+            OpenAlOutput.getInstance().setReverb(ZephyrConfig.PLAYBACK_CAVE_REVERB.get());
         }
         catch (Exception ignored) {}
     }
@@ -226,6 +212,18 @@ public class MusicPlayer
     public void setLoopMode(boolean loop)
     {
         this.loopMode = loop;
+        if (loop) this.shuffleMode = false;
+    }
+
+    public boolean isShuffleMode()
+    {
+        return shuffleMode;
+    }
+
+    public void setShuffleMode(boolean shuffle)
+    {
+        this.shuffleMode = shuffle;
+        if (shuffle) this.loopMode = false;
     }
 
     /**
@@ -390,16 +388,12 @@ public class MusicPlayer
         currentConnection = conn;
         currentBitstream = new Bitstream(is);
         currentDecoder = new Decoder();
-        // ★ 不创建 AudioDevice，直接用 SourceDataLine（在第一帧解码后才知道实际格式）
-        currentLine = null;
-        currentFormat = null;
 
         stopped.set(false);
         paused.set(false);
         playing.set(true);
         playStartTimeMs = System.currentTimeMillis();
         positionOffsetSec = 0;
-        lineStartPosUs = 0;
         lastReturnedPos = 0;
 
         playThread = new Thread(this::decodeLoop, "ZephyrMusic-Decode");
@@ -415,64 +409,34 @@ public class MusicPlayer
     }
 
     /**
-     * 在第一次解码得到 SampleBuffer 后，根据其频率和声道数创建 SourceDataLine
+     * 在第一次解码得到 SampleBuffer 后，根据其频率和声道数打开 OpenAL 输出
      */
-    private SourceDataLine createSourceDataLine(int sampleRate, int channels) throws LineUnavailableException
+    private void openOutput(int sampleRate, int channels)
     {
-        AudioFormat fmt = new AudioFormat(
-                sampleRate,
-                16,
-                channels,
-                true,    // signed
-                false    // little-endian
-        );
-        ZephyrMusic.LOGGER.info("[Zephyr] Creating SourceDataLine: {} Hz, {} ch", sampleRate, channels);
-
-        // 列出所有可用 mixer（用于调试）
+        ZephyrMusic.LOGGER.info("[Zephyr] Opening OpenAL output: {} Hz, {} ch", sampleRate, channels);
         try
         {
-            Mixer.Info[] mixers = AudioSystem.getMixerInfo();
-            ZephyrMusic.LOGGER.info("[Zephyr] Available mixers: {}", mixers.length);
-            for (Mixer.Info mi : mixers)
+            OpenAlOutput.getInstance().openAsync(sampleRate, channels).get();
+            OpenAlOutput.getInstance().setVolume(getVolume());
+            applyReverbSetting();
+            String err = OpenAlOutput.getInstance().getLastError();
+            if (err != null)
             {
-                Mixer m = AudioSystem.getMixer(mi);
-                DataLine.Info lineInfo = new DataLine.Info(SourceDataLine.class, fmt);
-                boolean supported = m.isLineSupported(lineInfo);
-                ZephyrMusic.LOGGER.info("[Zephyr]   - {} (supported: {})", mi.getName(), supported);
-                if (supported)
-                {
-                    // 优先用第一个支持的 mixer
-                    SourceDataLine line = (SourceDataLine) m.getLine(lineInfo);
-                    line.open(fmt, 4096 * 4);  // 16KB buffer
-                    line.start();
-                    ZephyrMusic.LOGGER.info("[Zephyr] Opened SourceDataLine on mixer: {}, buffer={}",
-                            mi.getName(), line.getBufferSize());
-                    return line;
-                }
+                ZephyrMusic.LOGGER.error("[Zephyr] OpenAL open error: {}", err);
+                listeners.forEach(l -> l.onError("无法打开 OpenAL 音频输出: " + err));
             }
         }
         catch (Exception e)
         {
-            ZephyrMusic.LOGGER.warn("[Zephyr] Mixer enumeration failed: {}", e.getMessage());
+            ZephyrMusic.LOGGER.error("[Zephyr] Cannot open OpenAL output: {}", e.getMessage());
+            listeners.forEach(l -> l.onError("无法打开 OpenAL 音频输出: " + e.getMessage()));
         }
-
-        // Fallback：用默认 AudioSystem
-        DataLine.Info info = new DataLine.Info(SourceDataLine.class, fmt);
-        if (!AudioSystem.isLineSupported(info))
-        {
-            ZephyrMusic.LOGGER.error("[Zephyr] Default audio system does NOT support format: {}", fmt);
-            throw new LineUnavailableException("Format not supported: " + fmt);
-        }
-        SourceDataLine line = (SourceDataLine) AudioSystem.getLine(info);
-        line.open(fmt, 4096 * 4);
-        line.start();
-        ZephyrMusic.LOGGER.info("[Zephyr] Opened default SourceDataLine, buffer={}", line.getBufferSize());
-        return line;
     }
 
     private void decodeLoop()
     {
         int frameCount = 0;
+        boolean naturalEnd = false;
         try
         {
             while (!stopped.get())
@@ -488,6 +452,7 @@ public class MusicPlayer
                     if (frame == null)
                     {
                         ZephyrMusic.LOGGER.info("[Zephyr] Stream ended after {} frames", frameCount);
+                        naturalEnd = true;
                         // ★ 自动播放完毕，触发打卡（上报完整时长）
                         ScrobbleManager.getInstance().onSongEnded();
                         boolean wasLast = (queueIndex >= queue.size() - 1);
@@ -502,38 +467,22 @@ public class MusicPlayer
                     short[] samples = buf.getBuffer();
                     int len = buf.getBufferLength();
 
-                    // 第一帧：创建 SourceDataLine（基于实际的采样率/声道数）
-                    if (currentLine == null && len > 0)
+                    // 第一帧：打开 OpenAL 输出（基于实际的采样率/声道数）
+                    if (!outputOpened && len > 0)
                     {
                         int sr = buf.getSampleFrequency();
                         int ch = buf.getChannelCount();
                         ZephyrMusic.LOGGER.info("[Zephyr] First frame: {} Hz, {} ch, len={}", sr, ch, len);
-                        try
-                        {
-                            currentLine = createSourceDataLine(sr, ch);
-                            currentFormat = currentLine.getFormat();
-                            // ★ 记录 SourceDataLine 起始位置用于准确追踪播放进度
-                            lineStartPosUs = currentLine.getMicrosecondPosition();
-                            positionOffsetSec = 0;
-                            lastReturnedPos = 0;
-                            applyVolumeToLine();
-                        }
-                        catch (LineUnavailableException e)
-                        {
-                            ZephyrMusic.LOGGER.error("[Zephyr] Cannot open SourceDataLine: {}", e.getMessage());
-                            listeners.forEach(l -> l.onError("无法打开音频输出: " + e.getMessage()));
-                            break;
-                        }
+                        outputOpened = true;
+                        openOutput(sr, ch);
                     }
 
-                    if (len > 0 && currentLine != null)
+                    if (len > 0 && outputOpened)
                     {
                         // ★ 防越界：samples 数组实际长度可能 < len（JLayer SampleBuffer 复用 buffer）
                         int actualLen = Math.min(len, samples.length);
-                        // short[] -> byte[] (little-endian 16-bit PCM)
-                        byte[] bytes = shortsToBytesLE(samples, actualLen);
-                        // SourceDataLine.write 阻塞直到 buffer 有空间
-                        currentLine.write(bytes, 0, actualLen * 2);
+                        // 阻塞直到 OpenAL 队列有空位（对齐 SourceDataLine.write 语义）
+                        OpenAlOutput.getInstance().write(samples, actualLen);
                     }
                     frameCount++;
                 }
@@ -551,36 +500,23 @@ public class MusicPlayer
         }
         finally
         {
-            ZephyrMusic.LOGGER.info("[Zephyr] decodeLoop ending ({} frames decoded)", frameCount);
+            ZephyrMusic.LOGGER.info("[Zephyr] decodeLoop ending ({} frames decoded, naturalEnd={})", frameCount, naturalEnd);
+            if (naturalEnd)
+            {
+                // 自然播完：等剩余缓冲播放完再关流（避免吞掉结尾 ~0.5s）
+                OpenAlOutput.getInstance().drain(3000);
+            }
             cleanupPlaybackResources();
         }
-    }
-
-    /** short[] -> byte[] (little-endian)，JDK 没有 Arrays.toString for short[] 这种 */
-    private static byte[] shortsToBytesLE(short[] samples, int len)
-    {
-        byte[] b = new byte[len * 2];
-        for (int i = 0; i < len; i++)
-        {
-            short s = samples[i];
-            b[i * 2] = (byte) s;
-            b[i * 2 + 1] = (byte) (s >> 8);
-        }
-        return b;
     }
 
     private void cleanupPlaybackResources()
     {
         try
         {
-            SourceDataLine line = currentLine;
-            if (line != null)
-            {
-                try { line.drain(); } catch (Exception ignored) {}
-                try { line.stop(); } catch (Exception ignored) {}
-                try { line.close(); } catch (Exception ignored) {}
-                currentLine = null;
-            }
+            // 停止并释放 OpenAL source/buffer（device/context 保留复用）
+            OpenAlOutput.getInstance().stopStream();
+            outputOpened = false;
             if (currentBitstream != null)
             {
                 try { currentBitstream.close(); } catch (Exception ignored) {}
@@ -591,7 +527,6 @@ public class MusicPlayer
                 try { currentConnection.disconnect(); } catch (Exception ignored) {}
                 currentConnection = null;
             }
-            currentFormat = null;
         }
         catch (Exception ignored) {}
     }
@@ -601,10 +536,11 @@ public class MusicPlayer
         if (playing.get() && !paused.get())
         {
             paused.set(true);
-            // ★ 保存当前位置到 positionOffsetSec（暂停时 getPositionSec 返回此值）
-            positionOffsetSec = getPositionSec();
+            // ★ 冻结当前位置（暂停期间 getPositionSec 返回 lastReturnedPos）
+            lastReturnedPos = getPositionSec();
+            positionOffsetSec = 0;
             ScrobbleManager.getInstance().stopTicking();
-            try { if (currentLine != null) currentLine.stop(); } catch (Exception ignored) {}
+            OpenAlOutput.getInstance().pause();
             listeners.forEach(l -> l.onPlayStateChanged(false, true));
         }
     }
@@ -614,13 +550,10 @@ public class MusicPlayer
         if (playing.get() && paused.get())
         {
             paused.set(false);
-            // ★ 恢复时更新 lineStartPosUs，使位置从暂停处继续
-            if (currentLine != null)
-            {
-                lineStartPosUs = currentLine.getMicrosecondPosition();
-            }
+            // ★ 恢复：以暂停点为新的基准偏移
+            positionOffsetSec = lastReturnedPos;
             ScrobbleManager.getInstance().startTicking();
-            try { if (currentLine != null) currentLine.start(); } catch (Exception ignored) {}
+            OpenAlOutput.getInstance().resume();
             listeners.forEach(l -> l.onPlayStateChanged(true, false));
         }
     }
@@ -641,6 +574,8 @@ public class MusicPlayer
         ScrobbleManager.getInstance().stopTicking();
 
         cleanupPlaybackResources();
+        lastReturnedPos = 0;
+        positionOffsetSec = 0;
 
         if (notify)
         {
@@ -649,7 +584,7 @@ public class MusicPlayer
     }
 
     /**
-     * 下一首
+     * 下一首（顺序 / 单曲循环 / 随机）
      */
     public void next()
     {
@@ -658,17 +593,25 @@ public class MusicPlayer
             stop();
             return;
         }
-        int next = queueIndex + 1;
-        if (next >= queue.size())
+        int next;
+        if (shuffleMode && queue.size() > 1)
         {
-            if (loopMode)
+            do { next = random.nextInt(queue.size()); } while (next == queueIndex);
+        }
+        else
+        {
+            next = queueIndex + 1;
+            if (next >= queue.size())
             {
-                next = 0;
-            }
-            else
-            {
-                stop();
-                return;
+                if (loopMode)
+                {
+                    next = 0;
+                }
+                else
+                {
+                    stop();
+                    return;
+                }
             }
         }
         queueIndex = next;
@@ -794,8 +737,7 @@ public class MusicPlayer
                 currentConnection = conn;
                 currentBitstream = new Bitstream(is);
                 currentDecoder = new Decoder();
-                currentLine = null;
-                currentFormat = null;
+                outputOpened = false;
 
                 // 计算需要跳过的帧数（近似：MP3 44100Hz 每帧 1152 samples = 26.12ms）
                 // 也可以用 JLayer Header 的 frame count 计算
@@ -805,7 +747,6 @@ public class MusicPlayer
                 paused.set(false);
                 playing.set(true);
                 positionOffsetSec = seekTarget;
-                lineStartPosUs = 0;
                 lastReturnedPos = seekTarget;
                 playStartTimeMs = System.currentTimeMillis();
 
@@ -843,5 +784,6 @@ public class MusicPlayer
     {
         stopInternal(false);
         playExecutor.shutdownNow();
+        OpenAlOutput.getInstance().shutdown();
     }
 }

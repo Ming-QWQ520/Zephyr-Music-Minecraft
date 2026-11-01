@@ -1,5 +1,10 @@
 pluginManagement {
     repositories {
+        // BMCLAPI mirror first (fast, reliable in restricted networks)
+        maven {
+            name = 'MinecraftForgeMirror'
+            url = 'https://bmclapi2.bangbang93.com/maven/'
+        }
         gradlePluginPortal()
         maven {
             name = 'MinecraftForge'

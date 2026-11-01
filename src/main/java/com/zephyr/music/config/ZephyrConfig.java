@@ -14,6 +14,13 @@ public class ZephyrConfig
     public static final ForgeConfigSpec.ConfigValue<String> COOKIE;
     public static final ForgeConfigSpec.ConfigValue<String> DEFAULT_QUALITY;
     public static final ForgeConfigSpec.BooleanValue SCROBBLE_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue PLAYBACK_CAVE_REVERB;
+
+    // UI / 毛玻璃
+    public static final ForgeConfigSpec.BooleanValue UI_GLASS_BLUR;
+    public static final ForgeConfigSpec.IntValue UI_BLUR_STRENGTH;
+    public static final ForgeConfigSpec.BooleanValue HUD_FLOAT_MODE;
+    public static final ForgeConfigSpec.BooleanValue HUD_FLOAT_CONTROLS;
 
     // HUD 基础
     public static final ForgeConfigSpec.BooleanValue HUD_ENABLED;
@@ -59,6 +66,25 @@ public class ZephyrConfig
                 .define("default_quality", "exhigh");
         SCROBBLE_ENABLED = BUILDER.comment("Send play records (scrobble) to NetEase")
                 .define("scrobble_enabled", true);
+        BUILDER.pop();
+
+        BUILDER.push("playback");
+        // ★ 洞穴混响（OpenAL EFX reverb，默认关闭）
+        PLAYBACK_CAVE_REVERB = BUILDER.comment("Enable cave-like reverb (OpenAL EFX). Requires restart of playback to fully apply")
+                .define("cave_reverb", false);
+        BUILDER.pop();
+
+        BUILDER.push("ui");
+        // ★ 毛玻璃质感：实时背景模糊（仅在打开界面/开启悬浮面板时模糊一次）
+        UI_GLASS_BLUR = BUILDER.comment("Frosted-glass UI: blur the game view behind panels (captured once on open)")
+                .define("ui_glass_blur", true);
+        UI_BLUR_STRENGTH = BUILDER.comment("Blur strength 1 (soft) - 4 (frosty)")
+                .defineInRange("ui_blur_strength", 2, 1, 4);
+        // ★ HUD 悬浮面板模式
+        HUD_FLOAT_MODE = BUILDER.comment("HUD floating glass panel mode (F8 to drag/reposition)")
+                .define("hud_float_mode", true);
+        HUD_FLOAT_CONTROLS = BUILDER.comment("Show mini playback controls on the floating HUD panel")
+                .define("hud_float_controls", true);
         BUILDER.pop();
 
         BUILDER.push("auth");
@@ -119,6 +145,9 @@ public class ZephyrConfig
 
         SPEC = BUILDER.build();
     }
+
+    /** 毛玻璃模糊是否启用 */
+    public static boolean glassBlurEnabled() { return UI_GLASS_BLUR.get(); }
 
     /** 把 #RRGGBB 转为 ARGB int (alpha=FF) */
     public static int hexToArgb(String hex)

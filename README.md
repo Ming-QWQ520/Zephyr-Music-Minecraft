@@ -2,7 +2,7 @@
 
 > 在 Minecraft 中播放网易云音乐 · Forge 1.20.1 客户端模组
 
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](./LICENSE)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](./LICENSE)
 [![Forge](https://img.shields.io/badge/Forge-47.4.20-orange.svg)](https://files.minecraftforge.net/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-green.svg)](https://www.minecraft.net/)
 [![Java](https://img.shields.io/badge/Java-17-red.svg)](https://adoptium.net/)
@@ -14,6 +14,17 @@
 **Zephyr Music** 是一个 Minecraft Forge 模组，让你在游戏中聆听网易云音乐。支持扫码/手机验证码/邮箱登录、歌单浏览、歌曲搜索、逐字歌词（yrc）、游戏内 HUD 显示、完整的播放控制以及与网易云一致的听歌打卡机制。
 
 灵感来源于 [Zephyr Music 桌面播放器](https://github.com/)（Tauri 2 + Vue 3），将其核心功能移植到 Minecraft 客户端。
+
+---
+
+## v2.0.0 · 全新毛玻璃 UI / UX 重构
+
+- **毛玻璃质感界面** — 所有面板采用 SDF（有符号距离场）shader 绘制的抗锯齿圆角矩形，配合 `RenderTarget` 一次性背景模糊：界面打开时抓取一帧世界画面并做降采样高斯模糊，面板静态显示，不逐帧模糊，零卡顿。
+- **音乐 HUD 悬浮面板模式** — 全新玻璃悬浮卡片：封面、歌名、可点击进度条、迷你控制键（上一首/播放暂停/下一首/随机/循环）、当前歌词行。HUD 上的按钮**真实可点击**（通过输入事件拦截实现），按 **F8** 进入编辑模式拖拽调整位置。
+- **OpenAL 音频输出** — 播放引擎从 JavaSound 全面迁移到 OpenAL（Minecraft 自带的 LWJGL OpenAL Soft）：独立 ALC 设备/上下文、流式缓冲队列、精确样本级播放进度。
+- **洞穴混响** — 设置 → 播放 → 洞穴混响（OpenAL EFX Reverb，默认关闭），一键进入洞穴听感。
+- **播放控制补全** — 随机播放 / 单曲循环 / 顺序播放三模式切换、拖拽音量滑条、可拖拽进度条、玻璃质感控制栏。
+- **开源协议** — 由 AGPL-3.0 变更为 **GPL-3.0**。
 
 ---
 
