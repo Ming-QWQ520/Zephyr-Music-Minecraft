@@ -60,7 +60,7 @@ public class NeteaseSession
      */
     public CompletableFuture<Boolean> checkLoginStatus()
     {
-        if (ZephyrConfig.COOKIE.get() == null || ZephyrConfig.COOKIE.get().isEmpty())
+        if (!com.zephyr.music.config.LoginStore.hasCookie())
         {
             loggedIn = false;
             currentUser = null;
@@ -147,7 +147,7 @@ public class NeteaseSession
             String cookie = NeteaseApi.extractCookie(resp);
             if (cookie != null && !cookie.isEmpty())
             {
-                ZephyrConfig.COOKIE.set(cookie);
+                com.zephyr.music.config.LoginStore.setCookie(cookie);
                 loggedIn = true;
                 ZephyrMusic.LOGGER.info("[Zephyr] Login cookie saved");
             }
@@ -158,7 +158,7 @@ public class NeteaseSession
                 if (sc != null && !sc.isEmpty())
                 {
                     // 简化处理：只保留第一段，并尝试拼接完整
-                    ZephyrConfig.COOKIE.set(parseSetCookieHeader(sc));
+                    com.zephyr.music.config.LoginStore.setCookie(parseSetCookieHeader(sc));
                     loggedIn = true;
                     ZephyrMusic.LOGGER.info("[Zephyr] Login cookie saved from header");
                 }
@@ -230,7 +230,7 @@ public class NeteaseSession
     public CompletableFuture<Void> logout()
     {
         return api.logout().thenAccept(resp -> {
-            ZephyrConfig.COOKIE.set("");
+            com.zephyr.music.config.LoginStore.clear();
             loggedIn = false;
             currentUser = null;
             cachedPlaylists.clear();

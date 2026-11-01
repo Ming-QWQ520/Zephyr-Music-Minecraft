@@ -100,7 +100,7 @@ public class PlayerScreen extends Screen
         progBarY = this.height - CONTROL_H + 6;
 
         // 登录表单（ACCOUNT Tab 未登录时且需要输入框的模式才显示）
-        if (currentTab == Tab.ACCOUNT && !(NeteaseSession.getInstance().isLoggedIn() || !com.zephyr.music.config.ZephyrConfig.COOKIE.get().isEmpty()) && (loginMode == 2 || loginMode == 3))
+        if (currentTab == Tab.ACCOUNT && !(NeteaseSession.getInstance().isLoggedIn() || com.zephyr.music.config.LoginStore.hasCookie()) && (loginMode == 2 || loginMode == 3))
         {
             int contentW = this.width - SIDEBAR_W;
             int cx2 = SIDEBAR_W + contentW / 2;
@@ -588,7 +588,9 @@ public class PlayerScreen extends Screen
                 () -> mp.isLoopMode() ? "ON" : "OFF",
                 () -> mp.setLoopMode(!mp.isLoopMode())));
         play.items.add(new SettingItem("音质",
-                () -> ZephyrConfig.DEFAULT_QUALITY.get(),
+                () -> { String q = ZephyrConfig.DEFAULT_QUALITY.get();
+                        return "standard".equals(q) ? "标准" : "higher".equals(q) ? "较高"
+                                : "exhigh".equals(q) ? "极高" : "lossless".equals(q) ? "无损" : "Hi-Res"; },
                 () -> { String q = ZephyrConfig.DEFAULT_QUALITY.get();
                         ZephyrConfig.DEFAULT_QUALITY.set("standard".equals(q) ? "higher" : "higher".equals(q) ? "exhigh" : "exhigh".equals(q) ? "lossless" : "lossless".equals(q) ? "hires" : "standard"); }));
         play.items.add(new SettingItem("音量",
@@ -627,9 +629,9 @@ public class PlayerScreen extends Screen
                 () -> (ZephyrConfig.HUD_LYRICS_LINES.get() - 1) / 11.0,
                 r -> ZephyrConfig.HUD_LYRICS_LINES.set((int) Math.round(1 + r * 11)), null));
         hud.items.add(new SettingItem("面板宽度",
-                () -> String.valueOf(ZephyrConfig.HUD_PANEL_WIDTH.get()),
-                () -> (ZephyrConfig.HUD_PANEL_WIDTH.get() - 100) / 500.0,
-                r -> ZephyrConfig.HUD_PANEL_WIDTH.set((int) Math.round(100 + r * 500)), null));
+                () -> String.valueOf(ZephyrConfig.HUD_WIDTH.get()),
+                () -> (ZephyrConfig.HUD_WIDTH.get() - 120) / 360.0,
+                r -> ZephyrConfig.HUD_WIDTH.set((int) Math.round(120 + r * 360)), null));
         hud.items.add(new SettingItem("封面大小",
                 () -> String.valueOf(ZephyrConfig.HUD_COVER_SIZE.get()),
                 () -> (ZephyrConfig.HUD_COVER_SIZE.get() - 16) / 240.0,
@@ -674,13 +676,6 @@ public class PlayerScreen extends Screen
                 () -> (ZephyrConfig.LYRIC_FONT_SIZE.get() - 6) / 10.0,
                 r -> ZephyrConfig.LYRIC_FONT_SIZE.set((int) Math.round(6 + r * 10)), null));
         out.add(lyric);
-
-        SettingSection misc = new SettingSection("通用");
-        misc.items.add(new SettingItem("API 地址",
-                () -> { String b = ZephyrConfig.API_BASE.get();
-                        return b.length() > 26 ? b.substring(0, 25) + "…" : b; },
-                () -> { }));
-        out.add(misc);
         return out;
     }
 
@@ -752,7 +747,7 @@ public class PlayerScreen extends Screen
         int accent = 0xFF4FC3F7, text = 0xFFFFFFFF, dim = 0xFF888888;
 
         // ★ 有 cookie 就认为已登录（即使 checkLoginStatus 还没执行）
-        boolean hasCookie = !com.zephyr.music.config.ZephyrConfig.COOKIE.get().isEmpty();
+        boolean hasCookie = com.zephyr.music.config.LoginStore.hasCookie();
         boolean loggedIn = NeteaseSession.getInstance().isLoggedIn() || hasCookie;
 
         // 已登录：显示用户信息

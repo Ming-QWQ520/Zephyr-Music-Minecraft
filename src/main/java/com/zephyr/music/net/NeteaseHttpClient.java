@@ -70,19 +70,19 @@ public class NeteaseHttpClient
 
     public String getCookie()
     {
-        String c = ZephyrConfig.COOKIE.get();
+        String c = com.zephyr.music.config.LoginStore.getCookie();
         return c == null ? "" : c;
     }
 
     /** 保存 cookie 时清理换行符和控制字符 */
     public void setCookie(String cookie)
     {
-        ZephyrConfig.COOKIE.set(sanitizeCookie(cookie));
+        com.zephyr.music.config.LoginStore.setCookie(sanitizeCookie(cookie));
     }
 
     public void clearCookie()
     {
-        ZephyrConfig.COOKIE.set("");
+        com.zephyr.music.config.LoginStore.clear();
     }
 
     /** 清理 cookie 中的换行/控制字符（防止破坏 HTTP header） */

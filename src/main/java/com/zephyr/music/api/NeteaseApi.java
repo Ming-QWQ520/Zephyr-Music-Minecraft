@@ -187,7 +187,7 @@ public class NeteaseApi
     {
         Map<String, String> p = new HashMap<>();
         p.put("id", String.valueOf(id));
-        p.put("level", level == null ? "exhigh" : level);
+        p.put("level", level == null ? "standard" : level);
         if ("dolby".equals(level)) p.put("os", "pc");
         return http.get("/song/url/v1", p);
     }

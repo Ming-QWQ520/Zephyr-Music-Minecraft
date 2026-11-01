@@ -242,7 +242,7 @@ public class MusicPlayer
                 listeners.forEach(l -> l.onSongChanged(song));
 
                 String level = ZephyrConfig.DEFAULT_QUALITY.get();
-                if (level == null || level.isEmpty()) level = "exhigh";
+                if (level == null || level.isEmpty()) level = "standard";
                 JsonObject urlResp = NeteaseSession.getInstance().getApi().songUrlV1(song.id, level).join();
                 String url = NeteaseApi.extractSongUrl(urlResp);
                 if (url == null || url.isEmpty())
@@ -416,11 +416,15 @@ public class MusicPlayer
         ZephyrMusic.LOGGER.info("[Zephyr] Opening OpenAL output: {} Hz, {} ch", sampleRate, channels);
         try
         {
-            OpenAlOutput.getInstance().openAsync(sampleRate, channels).get();
-            OpenAlOutput.getInstance().setVolume(getVolume());
-            applyReverbSetting();
+            // v0.1.0：同步握手打开（泵线程建好 source/buffers 后返回），失败时置 lastError
+            boolean ok = OpenAlOutput.getInstance().open(sampleRate, channels);
+            if (ok)
+            {
+                OpenAlOutput.getInstance().setVolume(getVolume());
+                applyReverbSetting();
+            }
             String err = OpenAlOutput.getInstance().getLastError();
-            if (err != null)
+            if (!ok || err != null)
             {
                 ZephyrMusic.LOGGER.error("[Zephyr] OpenAL open error: {}", err);
                 listeners.forEach(l -> l.onError("无法打开 OpenAL 音频输出: " + err));
@@ -454,12 +458,9 @@ public class MusicPlayer
                         ZephyrMusic.LOGGER.info("[Zephyr] Stream ended after {} frames", frameCount);
                         naturalEnd = true;
                         // ★ 自动播放完毕，触发打卡（上报完整时长）
+                        // ★ v0.1.0 修复：切歌动作移到 finally（drain + 清理之后），
+                        //   避免下一首歌的 open() 拆掉本首尚未播完的 AL 队列
                         ScrobbleManager.getInstance().onSongEnded();
-                        boolean wasLast = (queueIndex >= queue.size() - 1);
-                        if (loopMode || !wasLast)
-                        {
-                            playExecutor.submit(this::next);
-                        }
                         break;
                     }
                     SampleBuffer buf = (SampleBuffer) currentDecoder.decodeFrame(frame, currentBitstream);
@@ -503,10 +504,20 @@ public class MusicPlayer
             ZephyrMusic.LOGGER.info("[Zephyr] decodeLoop ending ({} frames decoded, naturalEnd={})", frameCount, naturalEnd);
             if (naturalEnd)
             {
-                // 自然播完：等剩余缓冲播放完再关流（避免吞掉结尾 ~0.5s）
-                OpenAlOutput.getInstance().drain(3000);
+                // 自然播完：声明流结束后等剩余音频真正播完再关流
+                // （write 已阻塞节流，残余 ≤ ~2s 缓冲，超时 15s 兜底）
+                OpenAlOutput.getInstance().markEndOfStream();
+                OpenAlOutput.getInstance().drain(15000);
             }
             cleanupPlaybackResources();
+            if (naturalEnd && !stopped.get())
+            {
+                boolean wasLast = (queueIndex >= queue.size() - 1);
+                if (loopMode || !wasLast)
+                {
+                    playExecutor.submit(this::next);
+                }
+            }
         }
     }
 
@@ -710,7 +721,7 @@ public class MusicPlayer
             try
             {
                 // 重新获取 URL
-                JsonObject urlResp = NeteaseSession.getInstance().getApi().songUrlV1(seekSong.id, level == null ? "exhigh" : level).join();
+                JsonObject urlResp = NeteaseSession.getInstance().getApi().songUrlV1(seekSong.id, level == null ? "standard" : level).join();
                 String url = NeteaseApi.extractSongUrl(urlResp);
                 if (url == null || url.isEmpty())
                 {

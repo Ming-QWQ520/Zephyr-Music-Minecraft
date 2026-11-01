@@ -17,7 +17,17 @@
 
 ---
 
-## v2.0.0 · 全新毛玻璃 UI / UX 重构
+## v0.1.0 · 播放引擎修复与体验优化
+
+- **修复无法正常播放** — 音频输出引擎重构为泵线程（pump）架构：`write()` 阻塞式写入有界队列形成实时背压，解码速度被播放速度锁住；此前每首歌几秒就跳下一首的问题已彻底修复（该 bug 源于旧的异步 write 竞态 + 误判 naturalEnd）。
+- **修复音频数据竞争** — 写入前立即拷贝 PCM（JLayer 的 SampleBuffer 会复用内部数组），消除乱序/爆音。
+- **HUD 默认尺寸缩小** — 悬浮面板 220×94 → 160×84，封面 44 → 32，进度区改为从面板顶部定位，隐藏控制键时不再重叠。
+- **默认音质改为标准** — `audio_quality` 默认 `standard`（128k），设置内音质选项显示中文（标准/较高/极高/无损/Hi-Res）。
+- **登录态跨版本保留** — 登录 cookie 改存独立文件 `config/zephyrmusic-login.json`，不再放在 Forge 配置里：模组版本更新 / 配置修正不再清除登录态；旧配置中的 cookie 会在首次运行时自动迁移。
+- **移除设置中的 API 端点项** — API 地址改为内部配置，不再暴露在设置界面。
+- **版本信息** — 版本号 0.1.0，作者 Ming。
+
+## v2.0.0 · 毛玻璃 UI / UX 重构（历史）
 
 - **毛玻璃质感界面** — 所有面板采用 SDF（有符号距离场）shader 绘制的抗锯齿圆角矩形，配合 `RenderTarget` 一次性背景模糊：界面打开时抓取一帧世界画面并做降采样高斯模糊，面板静态显示，不逐帧模糊，零卡顿。
 - **音乐 HUD 悬浮面板模式** — 全新玻璃悬浮卡片：封面、歌名、可点击进度条、迷你控制键（上一首/播放暂停/下一首/随机/循环）、当前歌词行。HUD 上的按钮**真实可点击**（通过输入事件拦截实现），按 **F8** 进入编辑模式拖拽调整位置。
@@ -123,8 +133,8 @@
 | `hud_enabled` | `true` | 启用 HUD |
 | `hud_anchor` | `top_left` | 锚点（top_left/top_right/bottom_left/bottom_right） |
 | `hud_x` / `hud_y` | `12` / `12` | 偏移量 |
-| `hud_panel_width` | `220` | 面板宽度（100-600） |
-| `hud_cover_size` | `64` | 封面大小（16-256） |
+| `hud_width` | `160` | 面板宽度（120-480） |
+| `hud_cover_size` | `40` | 封面大小（16-256，经典 HUD） |
 | `hud_bg_opacity` | `0.0` | 背景透明度（0=透明，1=不透明） |
 | `hud_show_border` | `false` | 显示边框 |
 | `hud_show_cover` | `true` | 显示封面 |
@@ -154,9 +164,13 @@
 ### 通用
 | 选项 | 默认值 | 说明 |
 |------|--------|------|
-| `api_base` | `https://musicapi.mingqwq.top` | 网易云 API 地址 |
-| `default_quality` | `exhigh` | 默认音质 |
+| `api_base` | `https://musicapi.mingqwq.top` | 网易云 API 地址（内部，设置界面已移除该项） |
+| `audio_quality` | `standard` | 默认音质（standard=128k / higher=192k / exhigh=320k / lossless / hires） |
 | `scrobble_enabled` | `true` | 听歌打卡开关 |
+
+### 登录态
+
+登录 cookie 存储在独立文件 `config/zephyrmusic-login.json`，**不受 Forge 配置修正与模组版本更新影响**。旧版本存储在 `zephyrmusic-client.toml` 的 `auth.cookie` 中的登录态会在首次运行 v0.1.0+ 时自动迁移。
 
 ---
 

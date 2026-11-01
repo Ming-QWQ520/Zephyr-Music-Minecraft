@@ -33,8 +33,8 @@ import java.util.List;
  */
 public class MusicHudOverlay implements IGuiOverlay
 {
-    private static final int PAD = 10;
-    private static final int COVER = 44;
+    private static final int PAD = 8;
+    private static final int COVER = 32;
     private static final int RADIUS = 12;
 
     // ---- 编辑模式状态（静态：ClientEventHandler 直接调用） ----
@@ -173,7 +173,7 @@ public class MusicHudOverlay implements IGuiOverlay
         {
             renderCover(g, mc, song.picUrl, contentX, y + PAD, COVER);
         }
-        int textX = contentX + (showCover ? COVER + 10 : 0);
+        int textX = contentX + (showCover ? COVER + 8 : 0);
         int textW = x + panelW - PAD - textX;
 
         // --- 歌曲名 ---
@@ -183,29 +183,30 @@ public class MusicHudOverlay implements IGuiOverlay
                 ModernUI.TEXT_PRIMARY, false);
         // --- 歌手 ---
         g.drawString(mc.font, Component.literal(truncate(mc, song.getDisplayArtist(), textW)),
-                textX, y + PAD + 11, ModernUI.TEXT_SECONDARY, false);
+                textX, y + PAD + 10, ModernUI.TEXT_SECONDARY, false);
 
         // --- 进度条（可点击 seek） ---
         double pos = mp.getPositionSec();
         double total = song.duration > 0 ? song.duration / 1000.0 : 0;
-        int barY = y + panelH - 34;
+        // ★ v0.1.0：进度区改从面板顶部定位（控件隐藏时也不会与封面重叠）
+        int barY = y + PAD + COVER + 4;
         int barX = x + PAD + 2;
         int barW = panelW - PAD * 2 - 4;
         seekRect[0] = barX; seekRect[1] = barY - 2; seekRect[2] = barW; seekRect[3] = 8;
         ModernUI.drawProgressBar(g, barX, barY, barW, 4, total > 0 ? pos / total : 0);
         String t1 = formatTime(pos), t2 = formatTime(total);
-        g.drawString(mc.font, Component.literal(t1), barX, barY + 7, ModernUI.TEXT_ACCENT, false);
-        g.drawString(mc.font, Component.literal(t2), barX + barW - mc.font.width(t2), barY + 7, ModernUI.TEXT_DIM, false);
+        g.drawString(mc.font, Component.literal(t1), barX, barY + 6, ModernUI.TEXT_ACCENT, false);
+        g.drawString(mc.font, Component.literal(t2), barX + barW - mc.font.width(t2), barY + 6, ModernUI.TEXT_DIM, false);
 
         // --- 迷你控制键 ---
         if (ZephyrConfig.HUD_FLOAT_CONTROLS.get())
         {
-            int by = y + panelH - 18;
+            int by = barY + 17;
             int bx = x + PAD + 2;
-            drawHudButton(g, 0, bx, by, "⏮", false);          bx += 22;
-            drawHudButton(g, 1, bx, by, mp.isPaused() ? "▶" : "⏸", false); bx += 22;
-            drawHudButton(g, 2, bx, by, "⏭", false);          bx += 22;
-            drawHudButton(g, 3, bx, by, "🔀", mp.isShuffleMode()); bx += 22;
+            drawHudButton(g, 0, bx, by, "⏮", false);          bx += 19;
+            drawHudButton(g, 1, bx, by, mp.isPaused() ? "▶" : "⏸", false); bx += 19;
+            drawHudButton(g, 2, bx, by, "⏭", false);          bx += 19;
+            drawHudButton(g, 3, bx, by, "🔀", mp.isShuffleMode()); bx += 19;
             drawHudButton(g, 4, bx, by, "🔁", mp.isLoopMode());
         }
 
@@ -219,7 +220,7 @@ public class MusicHudOverlay implements IGuiOverlay
                 if (curIdx >= 0)
                 {
                     LyricLine line = lyrics.get(curIdx);
-                    int ly = y + PAD + 24;
+                    int ly = y + PAD + 20;
                     if (line.isYrc && ZephyrConfig.LYRIC_KARAOKE.get())
                     {
                         renderKaraokeLine(g, mc, line, textX, ly, textW, pos);
@@ -325,10 +326,11 @@ public class MusicHudOverlay implements IGuiOverlay
 
     private int[] floatPanelRect(Minecraft mc, NeteaseSong song, int sw, int sh)
     {
-        int w = Math.max(ZephyrConfig.HUD_PANEL_WIDTH.get(), 190);
-        int controlsH = ZephyrConfig.HUD_FLOAT_CONTROLS.get() ? 16 : 0;
-        int h = PAD * 2 + COVER + 14 + controlsH;   // 封面行 + 进度(时间+条) + 控制
-        if (!ZephyrConfig.HUD_FLOAT_CONTROLS.get()) h = PAD * 2 + Math.max(COVER, 34) + 14;
+        // ★ v0.1.0 HUD 缩小：宽度默认 160（原 220）、封面 32（原 44）、内边距 8（原 10）
+        int w = Math.max(ZephyrConfig.HUD_WIDTH.get(), 140);
+        int controlsH = ZephyrConfig.HUD_FLOAT_CONTROLS.get() ? 17 : 0;
+        // 内边距×2 + 封面行 + 间隔 4 + 进度条 4 + 2 + 时间文字 9 + 控制键区
+        int h = PAD * 2 + COVER + 4 + 6 + 9 + controlsH;
         int[] base = anchorBase(sw, sh, w, h);
         int x = clamp(base[0] + ZephyrConfig.HUD_X.get(), 2, Math.max(2, sw - w - 2));
         int y = clamp(base[1] + ZephyrConfig.HUD_Y.get(), 2, Math.max(2, sh - h - 2));
@@ -343,7 +345,7 @@ public class MusicHudOverlay implements IGuiOverlay
         int barH = ZephyrConfig.HUD_SHOW_PROGRESS_BAR.get() ? 10 : 0;
         int h = PAD * 2 + lineH * 2 + 2 + barH + lyricLines * lineH;
         h = Math.max(h, PAD * 2 + coverSize);
-        int w = Math.max(ZephyrConfig.HUD_PANEL_WIDTH.get(), 150);
+        int w = Math.max(ZephyrConfig.HUD_WIDTH.get(), 140);
         int[] base = anchorBase(sw, sh, w, h);
         int x = clamp(base[0] + ZephyrConfig.HUD_X.get(), 2, Math.max(2, sw - w - 2));
         int y = clamp(base[1] + ZephyrConfig.HUD_Y.get(), 2, Math.max(2, sh - h - 2));

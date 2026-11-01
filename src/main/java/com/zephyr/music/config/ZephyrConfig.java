@@ -15,7 +15,6 @@ public class ZephyrConfig
     public static final ForgeConfigSpec.ConfigValue<String> DEFAULT_QUALITY;
     public static final ForgeConfigSpec.BooleanValue SCROBBLE_ENABLED;
     public static final ForgeConfigSpec.BooleanValue PLAYBACK_CAVE_REVERB;
-
     // UI / 毛玻璃
     public static final ForgeConfigSpec.BooleanValue UI_GLASS_BLUR;
     public static final ForgeConfigSpec.IntValue UI_BLUR_STRENGTH;
@@ -28,13 +27,13 @@ public class ZephyrConfig
     public static final ForgeConfigSpec.IntValue HUD_Y;
     public static final ForgeConfigSpec.DoubleValue HUD_VOLUME;
     public static final ForgeConfigSpec.ConfigValue<String> HUD_ANCHOR;
+    public static final ForgeConfigSpec.IntValue HUD_WIDTH;
 
     // HUD 显示选项
     public static final ForgeConfigSpec.BooleanValue HUD_COMPACT;
     public static final ForgeConfigSpec.BooleanValue HUD_SHOW_PROGRESS_BAR;
     public static final ForgeConfigSpec.BooleanValue HUD_SHOW_LYRICS;
     public static final ForgeConfigSpec.IntValue HUD_LYRICS_LINES;
-    public static final ForgeConfigSpec.IntValue HUD_PANEL_WIDTH;
     public static final ForgeConfigSpec.DoubleValue HUD_BG_OPACITY;
     public static final ForgeConfigSpec.BooleanValue HUD_SHOW_COVER;
     public static final ForgeConfigSpec.IntValue HUD_COVER_SIZE;
@@ -60,10 +59,12 @@ public class ZephyrConfig
     static
     {
         BUILDER.push("general");
-        API_BASE = BUILDER.comment("NetEase Cloud Music API base URL")
+        API_BASE = BUILDER.comment("NetEase Cloud Music API base URL (internal, not exposed in settings)")
                 .define("api_base", "https://musicapi.mingqwq.top");
-        DEFAULT_QUALITY = BUILDER.comment("Audio quality: standard / higher / exhigh / lossless / hires")
-                .define("default_quality", "exhigh");
+        // ★ v0.1.0：键改名 default_quality -> audio_quality，默认改为 standard（标准 128k）
+        //   （改名后旧配置中的 exhigh 不再生效，所有用户回到标准音质默认值）
+        DEFAULT_QUALITY = BUILDER.comment("Audio quality: standard (128k) / higher (192k) / exhigh (320k) / lossless / hires")
+                .define("audio_quality", "standard");
         SCROBBLE_ENABLED = BUILDER.comment("Send play records (scrobble) to NetEase")
                 .define("scrobble_enabled", true);
         BUILDER.pop();
@@ -88,7 +89,9 @@ public class ZephyrConfig
         BUILDER.pop();
 
         BUILDER.push("auth");
-        COOKIE = BUILDER.comment("Stored NetEase cookie")
+        // ★ v0.1.0：仅作旧版迁移源（登录态已改存 config/zephyrmusic-login.json，
+        //   不再受 Forge 配置修正影响，版本更新后登录态得以保留）
+        COOKIE = BUILDER.comment("[Legacy] migrated to zephyrmusic-login.json on first run")
                 .define("cookie", "");
         BUILDER.pop();
 
@@ -104,12 +107,13 @@ public class ZephyrConfig
         HUD_SHOW_PROGRESS_BAR = BUILDER.define("hud_show_progress_bar", true);
         HUD_SHOW_LYRICS = BUILDER.define("hud_show_lyrics", true);
         HUD_LYRICS_LINES = BUILDER.defineInRange("hud_lyrics_lines", 3, 1, 12);
-        HUD_PANEL_WIDTH = BUILDER.defineInRange("hud_panel_width", 220, 100, 600);
+        // ★ v0.1.0：键改名 hud_panel_width -> hud_width，默认 220 -> 160（HUD 缩小）
+        HUD_WIDTH = BUILDER.defineInRange("hud_width", 160, 120, 480);
         HUD_BG_OPACITY = BUILDER.defineInRange("hud_bg_opacity", 0.0, 0.0, 1.0);
         HUD_SHOW_COVER = BUILDER.comment("Show album cover thumbnail")
                 .define("hud_show_cover", true);
-        HUD_COVER_SIZE = BUILDER.comment("Cover image size (pixels)")
-                .defineInRange("hud_cover_size", 64, 16, 256);
+        HUD_COVER_SIZE = BUILDER.comment("Cover image size (pixels, classic HUD)")
+                .defineInRange("hud_cover_size", 40, 16, 256);
         HUD_SHOW_BORDER = BUILDER.comment("Show panel border")
                 .define("hud_show_border", false);
         HUD_PAUSE_ON_MENU = BUILDER.comment("Pause playback when game menu is open")

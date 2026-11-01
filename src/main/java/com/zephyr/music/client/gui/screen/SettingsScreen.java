@@ -74,7 +74,7 @@ public class SettingsScreen extends Screen
                     Arrays.asList("top_left", "top_right", "bottom_left", "bottom_right")));
             addEntry(new SliderEntryI("HUD X 偏移", ZephyrConfig.HUD_X, 0, 3840));
             addEntry(new SliderEntryI("HUD Y 偏移", ZephyrConfig.HUD_Y, 0, 2160));
-            addEntry(new SliderEntryI("面板宽度", ZephyrConfig.HUD_PANEL_WIDTH, 100, 600));
+            addEntry(new SliderEntryI("面板宽度", ZephyrConfig.HUD_WIDTH, 120, 480));
             addEntry(new SliderEntryD("背景透明度", ZephyrConfig.HUD_BG_OPACITY, 0.0, 1.0));
             addEntry(new ToggleEntry("显示边框", ZephyrConfig.HUD_SHOW_BORDER, Arrays.asList("OFF", "ON")));
             addEntry(new ToggleEntry("显示封面", ZephyrConfig.HUD_SHOW_COVER, Arrays.asList("OFF", "ON")));
@@ -82,6 +82,12 @@ public class SettingsScreen extends Screen
             addEntry(new ToggleEntry("紧凑模式", ZephyrConfig.HUD_COMPACT, Arrays.asList("OFF", "ON")));
             addEntry(new ToggleEntry("显示进度条", ZephyrConfig.HUD_SHOW_PROGRESS_BAR, Arrays.asList("OFF", "ON")));
             addEntry(new SliderEntryD("音量", ZephyrConfig.HUD_VOLUME, 0.0, 1.0));
+
+            // === 播放 ===
+            addEntry(new HeaderEntry("─── 播放 ───"));
+            addEntry(new QualityEntry("音质", ZephyrConfig.DEFAULT_QUALITY));
+            addEntry(new ToggleEntry("洞穴混响", ZephyrConfig.PLAYBACK_CAVE_REVERB, Arrays.asList("OFF", "ON")));
+            addEntry(new ToggleEntry("听歌打卡", ZephyrConfig.SCROBBLE_ENABLED, Arrays.asList("OFF", "ON")));
 
             // === 歌词设置 ===
             addEntry(new HeaderEntry("─── 歌词 ───"));
@@ -104,11 +110,8 @@ public class SettingsScreen extends Screen
             addEntry(new StringEntry("背景色 (HEX)", ZephyrConfig.THEME_BG, "#0A0A0A"));
 
             // === 通用 ===
-            addEntry(new HeaderEntry("─── 通用 ───"));
-            addEntry(new CycleEntry("音质", ZephyrConfig.DEFAULT_QUALITY,
-                    Arrays.asList("standard", "higher", "exhigh", "lossless", "hires")));
-            addEntry(new StringEntry("API 地址", ZephyrConfig.API_BASE, "https://musicapi.mingqwq.top"));
-            addEntry(new ToggleEntry("听歌打卡", ZephyrConfig.SCROBBLE_ENABLED, Arrays.asList("OFF", "ON")));
+            addEntry(new HeaderEntry("─── HUD 布局 ───"));
+            addEntry(new SliderEntryI("HUD 宽度", ZephyrConfig.HUD_WIDTH, 120, 480));
         }
 
         abstract class Entry extends ObjectSelectionList.Entry<Entry>
@@ -186,6 +189,42 @@ public class SettingsScreen extends Screen
             {
                 idx = (idx + 1) % options.size();
                 cfg.set(options.get(idx));
+                return true;
+            }
+            @Override public Component getNarration() { return Component.literal(label()); }
+        }
+
+        /** 音质选择：显示中文，存储 API level 键值（standard/higher/exhigh/lossless/hires） */
+        class QualityEntry extends Entry
+        {
+            static final String[] KEYS = {"standard", "higher", "exhigh", "lossless", "hires"};
+            static final String[] LABELS = {"标准", "较高", "极高", "无损", "Hi-Res"};
+            final String name;
+            final net.minecraftforge.common.ForgeConfigSpec.ConfigValue<String> cfg;
+            int idx;
+            QualityEntry(String n, net.minecraftforge.common.ForgeConfigSpec.ConfigValue<String> c)
+            {
+                name = n; cfg = c;
+                String cur = cfg.get();
+                idx = 0;
+                for (int i = 0; i < KEYS.length; i++) if (KEYS[i].equals(cur)) { idx = i; break; }
+            }
+            @Override String label() { return name + ": " + LABELS[idx]; }
+            @Override
+            public void render(GuiGraphics g, int idx, int top, int left, int w, int h, int mx, int my, boolean hov, float pt)
+            {
+                g.drawString(SettingsScreen.this.font, Component.literal(name), left + 4, top + 4, 0xFFFFFFFF, false);
+                String val = LABELS[this.idx];
+                int vw = SettingsScreen.this.font.width(val);
+                ModernUI.fillRound(g, left + w - vw - 16, top + 2, vw + 12, h - 4, 4, 0xFF222222);
+                g.drawString(SettingsScreen.this.font, Component.literal(val), left + w - vw - 10, top + 4,
+                        0xFF4ADE80, false);
+            }
+            @Override
+            public boolean mouseClicked(double x, double y, int b)
+            {
+                idx = (idx + 1) % KEYS.length;
+                cfg.set(KEYS[idx]);
                 return true;
             }
             @Override public Component getNarration() { return Component.literal(label()); }
@@ -325,19 +364,8 @@ public class SettingsScreen extends Screen
             @Override
             public boolean mouseClicked(double x, double y, int b)
             {
-                // 简单实现：点击弹出输入框比较麻烦，这里循环几个预设
-                if (name.contains("API"))
-                {
-                    String[] presets = {
-                        "https://musicapi.mingqwq.top",
-                        "http://localhost:3000"
-                    };
-                    String cur = cfg.get();
-                    int idx = -1;
-                    for (int i = 0; i < presets.length; i++) if (presets[i].equals(cur)) { idx = i; break; }
-                    cfg.set(presets[(idx + 1) % presets.length]);
-                }
-                else if (name.contains("主题色") || name.contains("强调色") || name.contains("背景色"))
+                // 主题色在几个预设之间循环
+                if (name.contains("主题色") || name.contains("强调色") || name.contains("背景色"))
                 {
                     String[] presets = {"#1DB954", "#4ADE80", "#0A0A0A", "#FF5555", "#00BFFF",
                                         "#9D4EDD", "#FF6B35", "#00F5D4"};

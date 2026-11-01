@@ -87,7 +87,7 @@ public class ClientEventHandler
             if (KEY_OPEN != null && KEY_OPEN.consumeClick())
             {
                 PlayerScreen ps = new PlayerScreen();
-                if (!com.zephyr.music.config.ZephyrConfig.COOKIE.get().isEmpty())
+                if (com.zephyr.music.config.LoginStore.hasCookie())
                 {
                     ps.setCurrentTab(PlayerScreen.Tab.PLAYLIST);
                     com.zephyr.music.api.NeteaseSession.getInstance().checkLoginStatus();
