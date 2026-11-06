@@ -20,6 +20,10 @@ public class ZephyrConfig
     public static final ForgeConfigSpec.IntValue UI_BLUR_STRENGTH;
     public static final ForgeConfigSpec.BooleanValue HUD_FLOAT_MODE;
     public static final ForgeConfigSpec.BooleanValue HUD_FLOAT_CONTROLS;
+    /** ★ 灵动岛模式（借鉴 DangoMusic Dynamic Island）：顶部居中胶囊 HUD，优先于悬浮面板 */
+    public static final ForgeConfigSpec.BooleanValue HUD_ISLAND_MODE;
+    /** 灵动岛宽度缩放（1.0 = 自适应基础宽度） */
+    public static final ForgeConfigSpec.DoubleValue HUD_ISLAND_SCALE;
 
     // HUD 基础
     public static final ForgeConfigSpec.BooleanValue HUD_ENABLED;
@@ -86,6 +90,11 @@ public class ZephyrConfig
                 .define("hud_float_mode", true);
         HUD_FLOAT_CONTROLS = BUILDER.comment("Show mini playback controls on the floating HUD panel")
                 .define("hud_float_controls", true);
+        // ★ 灵动岛模式（借鉴 DangoMusic）：顶部居中小胶囊，显示封面+歌名+迷你进度
+        HUD_ISLAND_MODE = BUILDER.comment("Dynamic-Island style HUD pill at top center (overrides floating panel)")
+                .define("hud_island_mode", false);
+        HUD_ISLAND_SCALE = BUILDER.comment("Dynamic Island scale (1.0 = auto width)")
+                .defineInRange("hud_island_scale", 1.0, 0.8, 1.5);
         BUILDER.pop();
 
         BUILDER.push("auth");

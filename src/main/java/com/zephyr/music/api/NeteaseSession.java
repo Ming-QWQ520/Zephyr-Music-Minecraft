@@ -313,6 +313,72 @@ public class NeteaseSession
         });
     }
 
+    // ============== 红心（借鉴 DangoMusic ♥） ==============
+
+    /** 红心歌曲 ID 缓存（登录后拉取，10 分钟过期） */
+    private final java.util.Set<Long> likedSongIds = new java.util.HashSet<>();
+    private volatile boolean likeListLoaded = false;
+    private long lastLikeListFetch = 0;
+
+    /** 确保红心列表已加载（10 分钟缓存）；返回是否已登录可操作 */
+    public CompletableFuture<Boolean> ensureLikeList()
+    {
+        if (currentUser == null)
+        {
+            return checkLoginStatus().thenCompose(ok -> {
+                if (!ok || currentUser == null) return CompletableFuture.completedFuture(false);
+                return ensureLikeList();
+            });
+        }
+        if (likeListLoaded && System.currentTimeMillis() - lastLikeListFetch < 10 * 60 * 1000)
+            return CompletableFuture.completedFuture(true);
+        return api.likeList(currentUser.userId).thenApply(resp -> {
+            java.util.Set<Long> ids = new java.util.HashSet<>();
+            try
+            {
+                if (resp.has("ids") && resp.get("ids").isJsonArray())
+                {
+                    for (var el : resp.getAsJsonArray("ids")) ids.add(el.getAsLong());
+                }
+            }
+            catch (Exception ignored) {}
+            synchronized (likedSongIds)
+            {
+                likedSongIds.clear();
+                likedSongIds.addAll(ids);
+            }
+            likeListLoaded = true;
+            lastLikeListFetch = System.currentTimeMillis();
+            return true;
+        }).exceptionally(ex -> false);
+    }
+
+    /** 本地缓存判断是否已红心（未拉取过列表时返回 false） */
+    public boolean isLiked(long songId)
+    {
+        synchronized (likedSongIds)
+        {
+            return likeListLoaded && likedSongIds.contains(songId);
+        }
+    }
+
+    /** 红心/取消红心，成功后更新本地缓存 */
+    public CompletableFuture<Boolean> toggleLike(long songId, boolean like)
+    {
+        return api.like(songId, like).thenApply(resp -> {
+            int code = resp.has("code") ? resp.get("code").getAsInt() : -1;
+            boolean ok = code == 200;
+            if (ok)
+            {
+                synchronized (likedSongIds)
+                {
+                    if (like) likedSongIds.add(songId); else likedSongIds.remove(songId);
+                }
+            }
+            return ok;
+        });
+    }
+
     /** 清除本地会话状态（cookie 的清理由调用方决定） */
     public void resetLocalState()
     {
@@ -320,6 +386,9 @@ public class NeteaseSession
         currentUser = null;
         cachedPlaylists.clear();
         lastPlaylistFetchTime = 0;
+        synchronized (likedSongIds) { likedSongIds.clear(); }
+        likeListLoaded = false;
+        lastLikeListFetch = 0;
         state = com.zephyr.music.config.LoginStore.hasCookie()
                 ? LoginState.UNKNOWN : LoginState.NOT_LOGGED_IN;
     }

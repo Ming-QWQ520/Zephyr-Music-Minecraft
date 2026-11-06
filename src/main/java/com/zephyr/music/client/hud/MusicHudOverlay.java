@@ -86,7 +86,7 @@ public class MusicHudOverlay implements IGuiOverlay
         if (!ZephyrConfig.HUD_ENABLED.get()) return;
 
         // ★ 一次性模糊：悬浮面板打开时抓取一次（面板静态，无需每帧模糊）
-        boolean floatMode = ZephyrConfig.HUD_FLOAT_MODE.get();
+        boolean floatMode = ZephyrConfig.HUD_FLOAT_MODE.get() && !ZephyrConfig.HUD_ISLAND_MODE.get();
         if ((floatMode || editMode) && ZephyrConfig.glassBlurEnabled() && !BlurManager.hasBlur())
         {
             BlurManager.requestBlur();
@@ -96,6 +96,19 @@ public class MusicHudOverlay implements IGuiOverlay
         MusicPlayer mp = MusicPlayer.getInstance();
         NeteaseSong song = mp.getCurrentSong();
         if (song == null) return;
+
+        // ★ 灵动岛模式（借鉴 DangoMusic Dynamic Island）：顶部居中小胶囊，不参与编辑/模糊
+        if (ZephyrConfig.HUD_ISLAND_MODE.get())
+        {
+            renderIsland(g, mc, mp, song, screenWidth);
+            String coverUrl0 = song.picUrl;
+            if (coverUrl0 != null && !coverUrl0.equals(lastCoverUrl))
+            {
+                lastCoverUrl = coverUrl0;
+                if (!coverUrl0.isEmpty()) CoverTextureManager.getInstance().getCover(coverUrl0, null);
+            }
+            return;
+        }
 
         int mouseX = (int) mc.mouseHandler.xpos();
         int mouseY = (int) mc.mouseHandler.ypos();
@@ -158,6 +171,53 @@ public class MusicHudOverlay implements IGuiOverlay
             g.fill(0, screenHeight - 14, screenWidth, screenHeight, 0x90000000);
             g.drawCenteredString(mc.font, Component.literal(hint), screenWidth / 2, screenHeight - 11, ZephyrConfig.getAccentColor());
         }
+    }
+
+    // ---------------- 灵动岛（借鉴 DangoMusic Dynamic Island） ----------------
+
+    /** 灵动岛命中区缓存（渲染时填充，供点击打开播放器） */
+    private static final int[] islandRect = new int[4];
+
+    /** 顶部居中胶囊：封面 + 歌名/歌手 + 时间，底部迷你进度条；点击打开播放器 */
+    private void renderIsland(GuiGraphics g, Minecraft mc, MusicPlayer mp, NeteaseSong song, int sw)
+    {
+        int accent = ZephyrConfig.getAccentColor();
+        double scale = ZephyrConfig.HUD_ISLAND_SCALE.get();
+        int pad = 8, cover = 20, h = 28;
+        int titleW = mc.font.width(truncate(mc, song.name, 160));
+        int artistW = mc.font.width(truncate(mc, song.getDisplayArtist(), 160));
+        int textW = Math.max(titleW, artistW);
+        int w = (int) Math.round((pad + cover + 8 + textW + 10 + 34 + pad) * scale);
+        w = Math.max(120, Math.min(w, sw - 24));
+        int x = (sw - w) / 2;
+        int y = 6;
+        islandRect[0] = x; islandRect[1] = y; islandRect[2] = w; islandRect[3] = h;
+
+        // 玻璃胶囊 + 高光描边（圆角 = 高度一半，胶囊形）
+        ModernUI.fillRound(g, x, y, w, h, h / 2, 0xC0101014);
+        ModernUI.strokeRound(g, x, y, w, h, h / 2, ModernUI.withAlpha(0xFFFFFFFF, 36), 1);
+
+        int cy = y + (h - cover) / 2;
+        renderCover(g, mc, song.picUrl, x + pad, cy, cover);
+
+        int tx = x + pad + cover + 8;
+        String stateStr = mp.isPaused() ? "⏸ " : "▶ ";
+        String title = truncate(mc, song.name, (int) ((w - (tx - x) - 46) / scale));
+        g.drawString(mc.font, Component.literal(stateStr + title),
+                (int) (tx), y + 5, ModernUI.TEXT_PRIMARY, false);
+        String artist = truncate(mc, song.getDisplayArtist(), (int) ((w - (tx - x) - 46) / scale));
+        g.drawString(mc.font, Component.literal(artist),
+                (int) (tx), y + 15, ModernUI.TEXT_SECONDARY, false);
+
+        // 右侧：当前时间（强调色）
+        double pos = mp.getPositionSec();
+        String t1 = formatTime(pos);
+        g.drawString(mc.font, Component.literal(t1), x + w - pad - mc.font.width(t1), y + 10, accent, false);
+
+        // 底部迷你进度条（沿胶囊下缘内侧）
+        double total = song.duration > 0 ? song.duration / 1000.0 : 0;
+        int barX = x + h / 2, barW = w - h, barY = y + h - 3;
+        ModernUI.drawThinBar(g, barX, barY, barW, 2, total > 0 ? Math.min(1, pos / total) : 0);
     }
 
     // ---------------- 悬浮面板 ----------------
@@ -405,6 +465,17 @@ public class MusicHudOverlay implements IGuiOverlay
             }
 
             MusicPlayer mp = MusicPlayer.getInstance();
+            // ★ 灵动岛：点击任意处打开播放器
+            if (ZephyrConfig.HUD_ISLAND_MODE.get() && islandRect[2] > 0)
+            {
+                if (inRect(mx, my, islandRect[0], islandRect[1], islandRect[2], islandRect[3]))
+                {
+                    Minecraft.getInstance().setScreen(new com.zephyr.music.client.gui.screen.PlayerScreen());
+                    event.setCanceled(true);
+                    return;
+                }
+                return; // 灵动岛模式下悬浮面板控件不生效
+            }
             // 迷你控制按钮
             if (ZephyrConfig.HUD_FLOAT_MODE.get() && ZephyrConfig.HUD_FLOAT_CONTROLS.get())
             {

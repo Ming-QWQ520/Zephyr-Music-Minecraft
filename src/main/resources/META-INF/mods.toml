@@ -4,7 +4,7 @@ license="GPL-3.0"
 
 [[mods]]
 modId="zephyrmusic"
-version="0.1.0"
+version="0.2.0"
 displayName="Zephyr Music"
 authors="Ming"
 description='Play NetEase Cloud Music in Minecraft. Frosted-glass UI with SDF rounded panels and one-shot background blur, floating glass HUD with clickable controls, OpenAL audio output with optional cave reverb (EFX), shuffle/loop modes, full player GUI.'

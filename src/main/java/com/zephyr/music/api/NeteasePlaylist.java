@@ -11,6 +11,8 @@ public class NeteasePlaylist
     public int trackCount;
     public long playCount;
     public String creatorName = "";
+    /** 副标题（排行榜=更新频率，推荐歌单=文案），借鉴 DangoMusic 网格卡片第二行 */
+    public String subtitle = "";
 
     @Override
     public String toString()

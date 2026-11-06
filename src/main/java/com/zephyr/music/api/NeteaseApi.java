@@ -175,6 +175,29 @@ public class NeteaseApi
         return http.get("/personalized", p);
     }
 
+    /** 官方排行榜列表（无需登录）：list[] = {id,name,coverImgUrl,trackCount,updateFrequency} */
+    public CompletableFuture<JsonObject> toplist()
+    {
+        return http.get("/toplist");
+    }
+
+    /** 红心/取消红心（需登录） */
+    public CompletableFuture<JsonObject> like(long id, boolean like)
+    {
+        Map<String, String> p = new HashMap<>();
+        p.put("id", String.valueOf(id));
+        p.put("like", String.valueOf(like));
+        return http.get("/like", p);
+    }
+
+    /** 用户红心歌曲 ID 列表（需登录） */
+    public CompletableFuture<JsonObject> likeList(long uid)
+    {
+        Map<String, String> p = new HashMap<>();
+        p.put("uid", String.valueOf(uid));
+        return http.get("/likelist", p);
+    }
+
     // ============== 歌曲 ==============
 
     /** 歌曲详情 */
@@ -686,6 +709,19 @@ public class NeteaseApi
         }
     }
 
+    /** 每日推荐歌曲（/recommend/songs 响应 data.dailySongs[]） */
+    public static List<NeteaseSong> parseDailySongs(JsonObject resp)
+    {
+        try
+        {
+            if (resp.has("data") && resp.getAsJsonObject("data").has("dailySongs")
+                    && resp.getAsJsonObject("data").get("dailySongs").isJsonArray())
+                return parseSongs(resp.getAsJsonObject("data"), "dailySongs");
+        }
+        catch (Exception ignored) {}
+        return new ArrayList<>();
+    }
+
     public static List<NeteasePlaylist> parsePlaylists(JsonObject resp)
     {
         List<NeteasePlaylist> list = new ArrayList<>();
@@ -707,6 +743,10 @@ public class NeteaseApi
             else if (resp.has("data") && resp.get("data").isJsonArray())
             {
                 arr = resp.getAsJsonArray("data");
+            }
+            else if (resp.has("list") && resp.get("list").isJsonArray())
+            {
+                arr = resp.getAsJsonArray("list");
             }
             if (arr == null) return list;
             for (JsonElement el : arr)
@@ -741,6 +781,11 @@ public class NeteaseApi
                 p.creatorName = c.has("nickname") && !c.get("nickname").isJsonNull()
                         ? c.get("nickname").getAsString() : "";
             }
+            // 排行榜特有：更新频率（借鉴 DangoMusic Charts），作为副标题展示
+            if (obj.has("updateFrequency") && !obj.get("updateFrequency").isJsonNull())
+                p.subtitle = obj.get("updateFrequency").getAsString();
+            else if (obj.has("copywriter") && !obj.get("copywriter").isJsonNull())
+                p.subtitle = obj.get("copywriter").getAsString();
             return p;
         }
         catch (Exception e)
