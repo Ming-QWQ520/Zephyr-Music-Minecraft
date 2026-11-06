@@ -1,56 +1,48 @@
-# Gradle
-.gradle/
-build/
-!gradle/wrapper/gradle-wrapper.jar
 
+!gradle/wrapper/gradle-wrapper.jar
+# ---- Agent system local artifacts (never commit) ----
+# Build artifacts
+# Cookies / credentials (never commit)
+# Eclipse
+# Forge MDK extras
+# Gradle
 # IDE
-.idea/
+# Logs
+# OS
+# Runtime
+*.cookie
 *.iml
 *.ipr
 *.iws
-.vscode/
-.settings/
-.classpath
-.project
-.metadata/
-bin/
-out/
-
-# Eclipse
-*.launch
-eclipse/
-
-# Runtime
-run/
-run-data/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# Cookies / credentials (never commit)
-cookies.txt
-*.cookie
-config/zephyrmusic-client.toml
-
-# Build artifacts
 *.jar
-!gradle/wrapper/gradle-wrapper.jar
-
-# Forge MDK extras
-forge*changelog.txt
-
-# ---- Agent system local artifacts (never commit) ----
-skills/
-node_modules/
-worklog.md
-agent-ctx/
-scripts/
-tool-results/
-upload/
-download/
+*.launch
+*.log
+.DS_Store
+.classpath
 .env
 .env.*
+.gradle/
+.idea/
+.metadata/
+.project
+.settings/
+.vscode/
+Thumbs.db
+agent-ctx/
+bin/
+build/
+config/zephyrmusic-client.toml
+cookies.txt
+download/
+eclipse/
+forge*changelog.txt
+javac.*.args
+node_modules/
+out/
+run-data/
+run/
+scripts/
+skills/
+tool-results/
+upload/
+worklog.md

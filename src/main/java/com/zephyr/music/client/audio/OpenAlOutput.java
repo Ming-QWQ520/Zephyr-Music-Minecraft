@@ -469,7 +469,11 @@ public final class OpenAlOutput
             freeBuffers.add(buf);
             return;
         }
-        bufferSamples.put(buf, chunk.length);
+        // ★ 修复歌词/进度错位：chunk.length 是交错样本数（立体声 = 帧数×2），
+        //   而 AL_SAMPLE_OFFSET 的计数单位是"每声道帧"。这里必须存帧数，
+        //   否则立体声歌曲的 positionSnapshot 会以 2 倍速增长（processedSamples 与
+        //   AL_SAMPLE_OFFSET 单位不一致），进度条/歌词全部抢跑。
+        bufferSamples.put(buf, chunk.length / Math.max(1, channels));
         queuedCount++;
     }
 
@@ -590,15 +594,15 @@ public final class OpenAlOutput
         }
     }
 
-    /** EFX "cave" 混响参数（EFX 规范 CAVE 预设的近似值） */
+    /** EFX "cave" 混响参数（EFX 规范 CAVE 预设近似值；湿声增益比预设略高，保证可闻） */
     private void createReverb()
     {
         reverbEffect = EXTEfx.alGenEffects();
         EXTEfx.alEffecti(reverbEffect, EXTEfx.AL_EFFECT_TYPE, EXTEfx.AL_EFFECT_REVERB);
         EXTEfx.alEffectf(reverbEffect, EXTEfx.AL_REVERB_DENSITY, 1.0f);
         EXTEfx.alEffectf(reverbEffect, EXTEfx.AL_REVERB_DIFFUSION, 1.0f);
-        EXTEfx.alEffectf(reverbEffect, EXTEfx.AL_REVERB_GAIN, 0.316f);
-        EXTEfx.alEffectf(reverbEffect, EXTEfx.AL_REVERB_GAINHF, 0.0f);
+        EXTEfx.alEffectf(reverbEffect, EXTEfx.AL_REVERB_GAIN, 0.45f);
+        EXTEfx.alEffectf(reverbEffect, EXTEfx.AL_REVERB_GAINHF, 0.001f);
         EXTEfx.alEffectf(reverbEffect, EXTEfx.AL_REVERB_DECAY_TIME, 2.91f);
         EXTEfx.alEffectf(reverbEffect, EXTEfx.AL_REVERB_DECAY_HFRATIO, 1.30f);
         EXTEfx.alEffectf(reverbEffect, EXTEfx.AL_REVERB_REFLECTIONS_GAIN, 0.7f);

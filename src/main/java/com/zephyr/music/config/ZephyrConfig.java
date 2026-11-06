@@ -74,8 +74,8 @@ public class ZephyrConfig
         BUILDER.pop();
 
         BUILDER.push("playback");
-        // ★ 洞穴混响（OpenAL EFX reverb，默认关闭）
-        PLAYBACK_CAVE_REVERB = BUILDER.comment("Enable cave-like reverb (OpenAL EFX). Requires restart of playback to fully apply")
+        // ★ 洞穴混响（OpenAL EFX reverb，默认关闭；设置页切换立即生效）
+        PLAYBACK_CAVE_REVERB = BUILDER.comment("Enable cave-like reverb (OpenAL EFX). Applies immediately when toggled")
                 .define("cave_reverb", false);
         BUILDER.pop();
 

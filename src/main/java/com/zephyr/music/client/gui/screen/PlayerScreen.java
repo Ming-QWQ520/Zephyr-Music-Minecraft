@@ -51,9 +51,9 @@ public class PlayerScreen extends Screen
     private static final int TRACK_C = 0x4D787880;
     private static final int GREEN = 0xFF30D158;
     private static final int GLASS_SEL = 0x21FFFFFF;
-    /** GLASS_WINDOW tint：rgba(0.10,0.10,0.13,0.18) */
-    private static final int WINDOW_TINT = 0x2E1A1A21;
-    private static final int SIDEBAR_TINT = 0x0DFFFFFF;
+    /** GLASS_WINDOW tint：rgba(0.10,0.10,0.13,0.25) —— 略加深保证文字对比度 */
+    private static final int WINDOW_TINT = 0x401A1A21;
+    private static final int SIDEBAR_TINT = 0x18FFFFFF;
 
     // ==================== 逻辑布局（DangoMusic drawWindow） ====================
     private static final float WIN_MX = 26f, WIN_MY = 20f, PAD = 10f;
@@ -281,6 +281,8 @@ public class PlayerScreen extends Screen
     public void removed()
     {
         if (qrTimer != null) { qrTimer.cancel(); qrTimer = null; }
+        // 播放器关闭后释放模糊纹理显存（HUD 不再消费一次性模糊）
+        BlurManager.invalidate();
     }
 
     @Override
@@ -748,19 +750,26 @@ public class PlayerScreen extends Screen
         GlassRenderer.glassPanel(gRef, ri(r.x), ri(r.y), ri(r.w), ri(r.h), radius, mulA(tint), sheen, blurBehind);
     }
 
-    /** 文字：y 为顶部，size 为 Dango 逻辑字号（MC 字号 9 → 缩放 size/9） */
+    /** 文字：y 为顶部，size 为 Dango 逻辑字号（MC 字号 9 → 缩放 size/9）。
+     *  ★ v0.1.1 修字体模糊：缩放比对齐到整数屏幕倍率（字体纹理按整数倍采样，
+     *  任意分辨率/dScale 下都锐利），并开启阴影提高玻璃底上的可读性 */
+    private int screenScale(float size)
+    {
+        return Math.max(1, Math.min(4, Math.round((size / 9f) * dScale)));
+    }
+
     private void text(String s, float x, float y, float size, int color) { text(s, x, y, size, color, false); }
 
     private void text(String s, float x, float y, float size, int color, boolean bold)
     {
         if (s == null || s.isEmpty() || uiAlpha < 0.01f) return;
-        float k = size / 9f;
+        float k = screenScale(size) / dScale;
         gRef.pose().pushPose();
         gRef.pose().translate(x, y, 0);
         gRef.pose().scale(k, k, 1f);
         Component c = Component.literal(s);
         if (bold) c = c.copy().withStyle(ChatFormatting.BOLD);
-        gRef.drawString(this.font, c, 0, 0, mulA(color), false);
+        gRef.drawString(this.font, c, 0, 0, mulA(color), true);
         gRef.pose().popPose();
     }
 
@@ -772,23 +781,25 @@ public class PlayerScreen extends Screen
 
     private void textC(String s, float cx, float y, float size, int color) { textC(s, cx, y, size, color, false); }
 
-    /** 逻辑字宽 */
+    /** 逻辑字宽（与 text() 的整数级缩放保持一致，截断才不会溢出） */
     private float tw(String s, float size, boolean bold)
     {
         if (s == null || s.isEmpty()) return 0;
-        float w = font.width(s) * (size / 9f);
-        return bold ? w + s.length() * (size / 9f) : w;
+        int k = screenScale(size);
+        float w = font.width(s) * k / dScale;
+        return bold ? w + s.length() * k / dScale : w;
     }
 
-    /** 图标符号（按中心点绘制） */
+    /** 图标符号（按中心点绘制；同样对齐整数屏幕缩放） */
     private void icon(String glyph, float cx, float cy, float size, int color)
     {
-        float k = size / 9f;
+        if (uiAlpha < 0.01f) return;
+        float k = screenScale(size) / dScale;
         float w = font.width(glyph) * k;
         gRef.pose().pushPose();
         gRef.pose().translate(cx - w / 2f, cy - size / 2f, 0);
         gRef.pose().scale(k, k, 1f);
-        gRef.drawString(this.font, Component.literal(glyph), 0, 0, mulA(color), false);
+        gRef.drawString(this.font, Component.literal(glyph), 0, 0, mulA(color), true);
         gRef.pose().popPose();
     }
 
@@ -1310,7 +1321,7 @@ public class PlayerScreen extends Screen
                     {
                         Rect pb = new Rect(coverR.right() - 40f, coverR.bottom() - 40f, 30f, 30f);
                         fill(pb, RED, 15f);
-                        icon("▶", pb.x + 16f, pb.y + 15f, 12f, TEXT_PRIMARY);
+                        GlassRenderer.drawSdfTriangle(gRef, pb.x + 16f, pb.y + 15f, 12f, mulA(TEXT_PRIMARY), false);
                     }
                     List<String> lines = wrap2(p.name, cw - 4f, 12f);
                     for (int li = 0; li < lines.size(); li++)
@@ -1395,10 +1406,10 @@ public class PlayerScreen extends Screen
         float y = page.y;
         float headerH = 62f;
 
-        // 返回圆钮
+        // 返回圆钮（矢量左三角）
         Rect bb = new Rect(x, y + 2f, 28f, 28f);
         fill(bb, hover(bb) ? CARD_HOVER : CARD, 14f);
-        icon("◀", bb.x + 13.5f, bb.y + 14f, 10f, TEXT_PRIMARY);
+        GlassRenderer.drawSdfTriangle(gRef, bb.x + 13f, bb.y + 14f, 10f, mulA(TEXT_PRIMARY), true);
         hit(bb, this::goBackPage);
         x += 40f;
 
@@ -1431,7 +1442,7 @@ public class PlayerScreen extends Screen
             float pw = tw(label, 12f, true) + 44f;
             Rect pb = new Rect(x, y + (headerH > 100f ? 64f : 52f) - 6f, pw, 30f);
             fill(pb, hover(pb) ? 0xD9FF375F : RED, 15f);
-            icon("▶", pb.x + 17f, pb.y + 15f, 11f, TEXT_PRIMARY);
+            GlassRenderer.drawSdfTriangle(gRef, pb.x + 17f, pb.y + 15f, 11f, mulA(TEXT_PRIMARY), false);
             text(label, pb.x + 30f, pb.y + 9f, 12f, TEXT_PRIMARY, true);
             final List<NeteaseSong> all = tracks;
             hit(pb, () -> playAll(all));
@@ -2232,18 +2243,25 @@ public class PlayerScreen extends Screen
         {
             float old = uiAlpha;
             uiAlpha = old * (1f - p);
-            icon("▶", cx + 1.5f * kPlay, cy, 18f * kPlay * (1f - 0.35f * p), TEXT_PRIMARY);
+            // ★ 矢量播放三角：替代位图字体 ▶，任意缩放都锐利
+            GlassRenderer.drawSdfTriangle(gRef, cx + 1.5f * kPlay, cy,
+                    18f * kPlay * (1f - 0.35f * p), mulA(TEXT_PRIMARY), false);
             uiAlpha = old;
         }
-        // ⏮ / ⏭
+        // ⏮ / ⏭（矢量）
         float pc = prevB.x + 14f;
         fill(new Rect(pc - 6f * kPrev, cy - 5.5f * kPrev, 2.2f * kPrev, 11f * kPrev), TEXT_PRIMARY, 1f);
-        icon("◀", pc + 2.5f * kPrev, cy, 12f * kPrev, TEXT_PRIMARY);
+        GlassRenderer.drawSdfTriangle(gRef, pc + 2.5f * kPrev, cy, 12f * kPrev, mulA(TEXT_PRIMARY), true);
         float nc = nextB.x + 14f;
-        icon("▶", nc - 2.5f * kNext, cy, 12f * kNext, TEXT_PRIMARY);
+        GlassRenderer.drawSdfTriangle(gRef, nc - 2.5f * kNext, cy, 12f * kNext, mulA(TEXT_PRIMARY), false);
         fill(new Rect(nc + 3.8f * kNext, cy - 5.5f * kNext, 2.2f * kNext, 11f * kNext), TEXT_PRIMARY, 1f);
         float q = queueA.on.tick(currentTab == Tab.QUEUE ? 1f : 0f);
-        icon("≡", queueB.x + 14f, cy, 14f * kQueue, mixColor(TEXT_PRIMARY, RED, Math.max(0f, Math.min(1f, q))));
+        int qc = mixColor(TEXT_PRIMARY, RED, Math.max(0f, Math.min(1f, q)));
+        // 队列图标：三条矢量横线（替代 ≡ 位图字形）
+        float qw0 = 14f * kQueue;
+        fill(new Rect(queueB.x + 14f - qw0 / 2f, cy - 5f, qw0, 1.8f), qc, 0.9f);
+        fill(new Rect(queueB.x + 14f - qw0 / 2f, cy - 0.9f, qw0, 1.8f), qc, 0.9f);
+        fill(new Rect(queueB.x + 14f - qw0 / 2f, cy + 3.2f, qw0 * 0.62f, 1.8f), qc, 0.9f);
         hit(prevB, () -> { prevA.press.v -= 7f; mp.prev(); });
         hit(playB, () -> { playA.press.v -= 7f; if (mp.getCurrentSong() == null) return; if (mp.isPaused()) mp.resume(); else mp.pause(); });
         hit(nextB, () -> { nextA.press.v -= 7f; mp.next(); });
@@ -2284,9 +2302,26 @@ public class PlayerScreen extends Screen
         fill(new Rect(knobX - 5f, volRect.y - 3f, 10f, 10f), TEXT_PRIMARY, 5f);
 
         Rect shB = new Rect(volRect.x - 72f, vy - 14f, 32f, 28f);
-        toggleButton(shB, mp.isShuffleMode(), shuffleA, "⇄", () -> mp.setShuffleMode(!mp.isShuffleMode()));
+        toggleButton(shB, mp.isShuffleMode(), shuffleA, this::paintShuffle, () -> mp.setShuffleMode(!mp.isShuffleMode()));
         Rect rpB = new Rect(shB.x - 40f, vy - 14f, 32f, 28f);
-        toggleButton(rpB, mp.isLoopMode(), repeatA, "↻", () -> mp.setLoopMode(!mp.isLoopMode()));
+        toggleButton(rpB, mp.isLoopMode(), repeatA, this::paintLoop, () -> mp.setLoopMode(!mp.isLoopMode()));
+    }
+
+    /** 随机播放矢量图标：上下双轨 + 右向箭头 */
+    private void paintShuffle(float cx, float cy)
+    {
+        fill(new Rect(cx - 6.5f, cy - 3.4f, 10.5f, 1.8f), TEXT_PRIMARY, 0.9f);
+        fill(new Rect(cx - 6.5f, cy + 1.6f, 10.5f, 1.8f), TEXT_PRIMARY, 0.9f);
+        GlassRenderer.drawSdfTriangle(gRef, cx + 6.5f, cy - 2.5f, 6.5f, mulA(TEXT_PRIMARY), false);
+        GlassRenderer.drawSdfTriangle(gRef, cx + 6.5f, cy + 2.5f, 6.5f, mulA(TEXT_PRIMARY), false);
+    }
+
+    /** 单曲循环矢量图标：圆环 + 右上箭头 */
+    private void paintLoop(float cx, float cy)
+    {
+        stroke(new Rect(cx - 5.5f, cy - 5.5f, 11f, 11f), TEXT_PRIMARY, 5.5f, 1.2f);
+        fill(new Rect(cx + 1.2f, cy - 7f, 4.6f, 1.8f), TEXT_PRIMARY, 0.9f);
+        GlassRenderer.drawSdfTriangle(gRef, cx + 5.8f, cy - 4.6f, 6.5f, mulA(TEXT_PRIMARY), false);
     }
 
     private float buttonAnim(Rect b, Anim a)
@@ -2304,12 +2339,18 @@ public class PlayerScreen extends Screen
 
     private void toggleButton(Rect b, boolean on, Anim a, String glyph, Runnable action)
     {
+        toggleButton(b, on, a, (cx, cy) -> icon(glyph, cx, cy, 14f, TEXT_PRIMARY), action);
+    }
+
+    /** 矢量图标版 toggle（随机/循环不再用位图字形 ⇄ ↻） */
+    private void toggleButton(Rect b, boolean on, Anim a, java.util.function.BiConsumer<Float, Float> painter, Runnable action)
+    {
         float o = a.on.tick(on ? 1f : 0f);
         float h = a.hover.tick(hover(b) ? 1f : 0f);
         float k = 1f + a.press.tick(0f) * 0.14f;
         int base = mixColor(0x12FFFFFF, CARD_HOVER, Math.max(0f, Math.min(1f, h)));
         fill(b.scaled(k), mixColor(base, 0xD9FF375F, Math.max(0f, Math.min(1f, o))), 9f * k);
-        icon(glyph, b.x + 16f, b.y + b.h / 2f, 14f * k, TEXT_PRIMARY);
+        painter.accept(b.x + 16f, b.y + b.h / 2f);
         hit(b, () -> { a.press.v -= 7f; action.run(); });
     }
 

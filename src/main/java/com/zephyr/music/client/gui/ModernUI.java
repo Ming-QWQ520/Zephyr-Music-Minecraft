@@ -19,8 +19,8 @@ public class ModernUI
     public static final int GLASS_DARK = 0xB4161619;
     /** 面板玻璃底色（浅一层，用于内嵌卡片） */
     public static final int GLASS_CARD = 0x8C1E1E22;
-    /** 面板玻璃底色（悬浮 HUD） */
-    public static final int GLASS_HUD = 0x99131316;
+    /** 面板玻璃底色（悬浮 HUD；无模糊时需要更高不透明度保证可读性） */
+    public static final int GLASS_HUD = 0xA9141418;
     /** 1px 亮边 */
     public static final int BORDER_LIGHT = 0x50FFFFFF;
     /** 文字层级（iOS 深色模式：主 96% / 次 62% / 弱 38%） */
@@ -68,10 +68,11 @@ public class ModernUI
         glassPanel(g, x, y, w, h, 8f, GLASS_CARD, 0.35f, false);
     }
 
-    /** 悬浮 HUD 玻璃卡 */
+    /** 悬浮 HUD 玻璃卡（★ 不再叠一次性模糊：静态模糊快照罩在持续运动的世界上是"假玻璃"的根源；
+     *  改为深色半透明 + SDF 软阴影 + 顶部高光，干净且诚实） */
     public static void glassHudPanel(GuiGraphics g, int x, int y, int w, int h)
     {
-        glassPanel(g, x, y, w, h, 12f, GLASS_HUD, 0.6f, true);
+        glassPanel(g, x, y, w, h, 12f, GLASS_HUD, 0.6f, false);
     }
 
     // ================= 基础绘制 =================

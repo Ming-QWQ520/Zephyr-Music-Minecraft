@@ -1,12 +1,12 @@
 package com.zephyr.music.client.hud;
 
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.zephyr.music.api.LyricLine;
 import com.zephyr.music.api.LyricWord;
 import com.zephyr.music.api.NeteaseSong;
 import com.zephyr.music.client.audio.CoverTextureManager;
 import com.zephyr.music.client.audio.MusicPlayer;
 import com.zephyr.music.client.glass.BlurManager;
+import com.zephyr.music.client.glass.GlassRenderer;
 import com.zephyr.music.client.gui.ModernUI;
 import com.zephyr.music.config.ZephyrConfig;
 import net.minecraft.client.Minecraft;
@@ -85,12 +85,8 @@ public class MusicHudOverlay implements IGuiOverlay
         if (player == null) return;
         if (!ZephyrConfig.HUD_ENABLED.get()) return;
 
-        // ★ 一次性模糊：悬浮面板打开时抓取一次（面板静态，无需每帧模糊）
-        boolean floatMode = ZephyrConfig.HUD_FLOAT_MODE.get() && !ZephyrConfig.HUD_ISLAND_MODE.get();
-        if ((floatMode || editMode) && ZephyrConfig.glassBlurEnabled() && !BlurManager.hasBlur())
-        {
-            BlurManager.requestBlur();
-        }
+        // ★ v0.1.1：HUD 不再请求背景模糊 —— 一次性模糊快照叠在持续运动的世界上是"假玻璃"。
+        //   播放器全屏界面仍保留打开瞬间的 RenderTarget 一次性模糊（架构不变）。
         BlurManager.runPending();
 
         MusicPlayer mp = MusicPlayer.getInstance();
@@ -109,6 +105,8 @@ public class MusicHudOverlay implements IGuiOverlay
             }
             return;
         }
+
+        boolean floatMode = ZephyrConfig.HUD_FLOAT_MODE.get();
 
         int mouseX = (int) mc.mouseHandler.xpos();
         int mouseY = (int) mc.mouseHandler.ypos();
@@ -178,46 +176,94 @@ public class MusicHudOverlay implements IGuiOverlay
     /** 灵动岛命中区缓存（渲染时填充，供点击打开播放器） */
     private static final int[] islandRect = new int[4];
 
-    /** 顶部居中胶囊：封面 + 歌名/歌手 + 时间，底部迷你进度条；点击打开播放器 */
+    /**
+     * 顶部居中胶囊：SDF 圆角封面 + 歌名/歌手 + 迷你 EQ 动画 + 底部进度条；点击打开播放器。
+     * ★ v0.1.1 重做布局：先按实际字体宽度算出胶囊尺寸再绘制（旧实现先算宽再除以 scale 截断，
+     *   scale ≠ 1 时文字必然溢出/挤压），整体以"绕顶中缩放"支持 island_scale。
+     */
     private void renderIsland(GuiGraphics g, Minecraft mc, MusicPlayer mp, NeteaseSong song, int sw)
     {
         int accent = ZephyrConfig.getAccentColor();
-        double scale = ZephyrConfig.HUD_ISLAND_SCALE.get();
-        int pad = 8, cover = 20, h = 28;
-        int titleW = mc.font.width(truncate(mc, song.name, 160));
-        int artistW = mc.font.width(truncate(mc, song.getDisplayArtist(), 160));
-        int textW = Math.max(titleW, artistW);
-        int w = (int) Math.round((pad + cover + 8 + textW + 10 + 34 + pad) * scale);
-        w = Math.max(120, Math.min(w, sw - 24));
+        float scale = ZephyrConfig.HUD_ISLAND_SCALE.get().floatValue();
+        scale = Math.max(0.6f, Math.min(2.0f, scale));
+
+        final int pad = 8, cover = 20, h = 30, gap = 8;
+        final int eqW = 10, timeGap = 8;
+
+        // ---- 1. 先测量（未缩放单位）----
+        int maxTextW = (int) ((sw - 24) / scale) - (pad * 2 + cover + gap + eqW + timeGap + 30);
+        maxTextW = Math.max(40, maxTextW);
+        String title = truncate(mc, song.name, maxTextW);
+        String artist = truncate(mc, song.getDisplayArtist(), maxTextW);
+        int textW = Math.max(mc.font.width(title), mc.font.width(artist));
+
+        int w = pad + cover + gap + textW + gap + eqW + timeGap + 30 + pad;
+        w = Math.max(120, Math.min(w, (int) ((sw - 24) / scale)));
+
+        double pos = mp.getPositionSec();
+        double total = song.duration > 0 ? song.duration / 1000.0 : 0;
+        String t1 = formatTime(pos);
+        int timeW = mc.font.width(t1);
+        w = pad + cover + gap + textW + gap + eqW + timeGap + timeW + pad;
+        w = Math.max(120, Math.min(w, (int) ((sw - 24) / scale)));
+
+        // ---- 2. 绕"顶中"缩放绘制 ----
+        g.pose().pushPose();
+        g.pose().translate(sw * (1f - scale) / 2f, 0f, 0f);
+        g.pose().scale(scale, scale, 1f);
+
         int x = (sw - w) / 2;
         int y = 6;
         islandRect[0] = x; islandRect[1] = y; islandRect[2] = w; islandRect[3] = h;
 
-        // 玻璃胶囊 + 高光描边（圆角 = 高度一半，胶囊形）
-        ModernUI.fillRound(g, x, y, w, h, h / 2, 0xC0101014);
-        ModernUI.strokeRound(g, x, y, w, h, h / 2, ModernUI.withAlpha(0xFFFFFFFF, 36), 1);
+        // 胶囊：软阴影 + 深色底 + 顶缘高光描边
+        GlassRenderer.drawSdfShadow(g, x, y, w, h, h / 2f, 0.5f, 10);
+        ModernUI.fillRound(g, x, y, w, h, h / 2, 0xE0101014);
+        ModernUI.strokeRound(g, x, y, w, h, h / 2, ModernUI.withAlpha(0xFFFFFFFF, 44), 1);
 
         int cy = y + (h - cover) / 2;
         renderCover(g, mc, song.picUrl, x + pad, cy, cover);
 
-        int tx = x + pad + cover + 8;
-        String stateStr = mp.isPaused() ? "⏸ " : "▶ ";
-        String title = truncate(mc, song.name, (int) ((w - (tx - x) - 46) / scale));
-        g.drawString(mc.font, Component.literal(stateStr + title),
-                (int) (tx), y + 5, ModernUI.TEXT_PRIMARY, false);
-        String artist = truncate(mc, song.getDisplayArtist(), (int) ((w - (tx - x) - 46) / scale));
-        g.drawString(mc.font, Component.literal(artist),
-                (int) (tx), y + 15, ModernUI.TEXT_SECONDARY, false);
+        // 文本区（垂直居中：两行 9px → 顶部 y+6）
+        int tx = x + pad + cover + gap;
+        g.drawString(mc.font, Component.literal(title), tx, y + 6, ModernUI.TEXT_PRIMARY, true);
+        g.drawString(mc.font, Component.literal(artist), tx, y + 16, ModernUI.TEXT_SECONDARY, false);
 
-        // 右侧：当前时间（强调色）
-        double pos = mp.getPositionSec();
-        String t1 = formatTime(pos);
-        g.drawString(mc.font, Component.literal(t1), x + w - pad - mc.font.width(t1), y + 10, accent, false);
+        // 迷你 EQ（播放）/ 暂停双条 —— 全矢量，无位图 emoji
+        int eqX = tx + textW + gap;
+        int eqCy = y + h / 2;
+        if (mp.isPaused())
+        {
+            g.fill(eqX, eqCy - 4, eqX + 2, eqCy + 4, 0xFFFFFFFF);
+            g.fill(eqX + 5, eqCy - 4, eqX + 7, eqCy + 4, 0xFFFFFFFF);
+        }
+        else
+        {
+            long t = System.currentTimeMillis();
+            for (int i = 0; i < 3; i++)
+            {
+                float ph = (t % 900L) / 900.0f * 2f + i * 0.9f;
+                float amp = 1.6f + 2.4f * (0.5f + 0.5f * (float) Math.sin(ph * Math.PI));
+                int bh = Math.max(2, Math.round(amp));
+                g.fill(eqX + i * 4, eqCy - bh / 2, eqX + i * 4 + 2, eqCy - bh / 2 + bh, accent);
+            }
+        }
+
+        // 右侧：当前时间（强调色，带阴影）
+        g.drawString(mc.font, Component.literal(t1), x + w - pad - timeW, y + (h - 8) / 2, accent, true);
 
         // 底部迷你进度条（沿胶囊下缘内侧）
-        double total = song.duration > 0 ? song.duration / 1000.0 : 0;
         int barX = x + h / 2, barW = w - h, barY = y + h - 3;
         ModernUI.drawThinBar(g, barX, barY, barW, 2, total > 0 ? Math.min(1, pos / total) : 0);
+
+        g.pose().popPose();
+
+        // 命中区按"缩放后的屏幕坐标"记录，点击测试才准确
+        int ox = Math.round(sw * (1f - scale) / 2f);
+        islandRect[0] = ox + Math.round(x * scale);
+        islandRect[1] = Math.round(y * scale);
+        islandRect[2] = Math.round(w * scale);
+        islandRect[3] = Math.round(h * scale);
     }
 
     // ---------------- 悬浮面板 ----------------
@@ -236,11 +282,10 @@ public class MusicHudOverlay implements IGuiOverlay
         int textX = contentX + (showCover ? COVER + 8 : 0);
         int textW = x + panelW - PAD - textX;
 
-        // --- 歌曲名 ---
-        String stateStr = mp.isPaused() ? "⏸ " : "▶ ";
-        String title = truncate(mc, song.name, textW - mc.font.width(stateStr) - 2);
-        g.drawString(mc.font, Component.literal(stateStr + title), textX, y + PAD + 1,
-                ModernUI.TEXT_PRIMARY, false);
+        // --- 歌曲名（状态由下方按钮/封面角标表达，不再拼位图符号） ---
+        String title = truncate(mc, song.name, textW - 2);
+        g.drawString(mc.font, Component.literal(title), textX, y + PAD + 1,
+                ModernUI.TEXT_PRIMARY, true);
         // --- 歌手 ---
         g.drawString(mc.font, Component.literal(truncate(mc, song.getDisplayArtist(), textW)),
                 textX, y + PAD + 10, ModernUI.TEXT_SECONDARY, false);
@@ -258,16 +303,16 @@ public class MusicHudOverlay implements IGuiOverlay
         g.drawString(mc.font, Component.literal(t1), barX, barY + 6, ModernUI.TEXT_ACCENT, false);
         g.drawString(mc.font, Component.literal(t2), barX + barW - mc.font.width(t2), barY + 6, ModernUI.TEXT_DIM, false);
 
-        // --- 迷你控制键 ---
+        // --- 迷你控制键（矢量图标） ---
         if (ZephyrConfig.HUD_FLOAT_CONTROLS.get())
         {
             int by = barY + 17;
             int bx = x + PAD + 2;
-            drawHudButton(g, 0, bx, by, "⏮", false);          bx += 19;
-            drawHudButton(g, 1, bx, by, mp.isPaused() ? "▶" : "⏸", false); bx += 19;
-            drawHudButton(g, 2, bx, by, "⏭", false);          bx += 19;
-            drawHudButton(g, 3, bx, by, "🔀", mp.isShuffleMode()); bx += 19;
-            drawHudButton(g, 4, bx, by, "🔁", mp.isLoopMode());
+            drawHudButton(g, 0, bx, by, false, false);                        bx += 19;
+            drawHudButton(g, 1, bx, by, mp.isPaused(), false);                bx += 19;
+            drawHudButton(g, 2, bx, by, false, false);                        bx += 19;
+            drawHudButton(g, 3, bx, by, false, mp.isShuffleMode());           bx += 19;
+            drawHudButton(g, 4, bx, by, false, mp.isLoopMode());
         }
 
         // --- 当前歌词 ---
@@ -310,9 +355,8 @@ public class MusicHudOverlay implements IGuiOverlay
         }
         int infoW = x + panelW - PAD - infoX;
 
-        String stateStr = mp.isPaused() ? "⏸ " : "▶ ";
-        g.drawString(mc.font, Component.literal(stateStr + truncate(mc, song.name, infoW - 16)),
-                infoX, y + PAD, ModernUI.TEXT_PRIMARY, false);
+        g.drawString(mc.font, Component.literal(truncate(mc, song.name, infoW - 16)),
+                infoX, y + PAD, ModernUI.TEXT_PRIMARY, true);
         g.drawString(mc.font, Component.literal(truncate(mc, "by: " + song.getDisplayArtist(), infoW)),
                 infoX, y + PAD + lineH, ModernUI.TEXT_SECONDARY, false);
 
@@ -373,13 +417,50 @@ public class MusicHudOverlay implements IGuiOverlay
     /** 进度条命中区域缓存 */
     private static final int[] seekRect = new int[4];
 
-    private void drawHudButton(GuiGraphics g, int id, int x, int y, String label, boolean active)
+    private void drawHudButton(GuiGraphics g, int id, int x, int y, boolean pausedState, boolean active)
     {
         boolean hovered = hoverId == id;
         buttonRects[id][0] = x; buttonRects[id][1] = y; buttonRects[id][2] = 16; buttonRects[id][3] = 12;
         ModernUI.fillRound(g, x, y, 16, 12, 4, active ? ModernUI.withAlpha(ZephyrConfig.getAccentColor(), 40) : (hovered ? ModernUI.CARD_HOVER : ModernUI.CARD));
-        g.drawCenteredString(Minecraft.getInstance().font, Component.literal(label),
-                x + 8, y + 2, active ? ModernUI.TEXT_ACCENT : ModernUI.TEXT_SECONDARY);
+        int fg = active ? ModernUI.TEXT_ACCENT : ModernUI.TEXT_SECONDARY;
+        float cx = x + 8f, cy = y + 6f;
+        switch (id)
+        {
+            case 0 -> { // 上一首：竖条 + 左三角
+                g.fill(Math.round(cx - 5f), Math.round(cy - 4f), Math.round(cx - 3f), Math.round(cy + 4f), fg);
+                GlassRenderer.drawSdfTriangle(g, cx + 1.5f, cy, 8f, fg, true);
+            }
+            case 1 -> { // 播放 / 暂停
+                if (pausedState) GlassRenderer.drawSdfTriangle(g, cx + 0.5f, cy, 9f, fg, false);
+                else { g.fill(Math.round(cx - 3.5f), Math.round(cy - 4f), Math.round(cx - 1f), Math.round(cy + 4f), fg); g.fill(Math.round(cx + 1f), Math.round(cy - 4f), Math.round(cx + 3.5f), Math.round(cy + 4f), fg); }
+            }
+            case 2 -> { // 下一首：右三角 + 竖条
+                GlassRenderer.drawSdfTriangle(g, cx - 1.5f, cy, 8f, fg, false);
+                g.fill(Math.round(cx + 3f), Math.round(cy - 4f), Math.round(cx + 5f), Math.round(cy + 4f), fg);
+            }
+            case 3 -> drawShuffleIcon(g, cx, cy, fg);
+            case 4 -> drawLoopIcon(g, cx, cy, fg);
+        }
+    }
+
+    /** 随机播放矢量图标：上下两条横线 + 两个右向箭头 */
+    private void drawShuffleIcon(GuiGraphics g, float cx, float cy, int fg)
+    {
+        int x0 = Math.round(cx - 6f), x1 = Math.round(cx + 4f);
+        g.fill(x0, Math.round(cy - 3f), x1, Math.round(cy - 2f), fg);
+        g.fill(x0, Math.round(cy + 2f), x1, Math.round(cy + 3f), fg);
+        GlassRenderer.drawSdfTriangle(g, cx + 5.5f, cy - 2.5f, 5f, fg, false);
+        GlassRenderer.drawSdfTriangle(g, cx + 5.5f, cy + 2.5f, 5f, fg, false);
+    }
+
+    /** 单曲循环矢量图标：圆环 + 右上箭头 */
+    private void drawLoopIcon(GuiGraphics g, float cx, float cy, int fg)
+    {
+        // 圆环：SDF 描边圆
+        ModernUI.strokeRound(g, Math.round(cx - 5f), Math.round(cy - 5f), 10, 10, 5, fg, 1);
+        // 箭头（右上缺口处）
+        g.fill(Math.round(cx + 1f), Math.round(cy - 6f), Math.round(cx + 5f), Math.round(cy - 4f), fg);
+        GlassRenderer.drawSdfTriangle(g, cx + 4.5f, cy - 4f, 5f, fg, false);
     }
 
     // ---------------- 布局计算 ----------------
@@ -542,17 +623,8 @@ public class MusicHudOverlay implements IGuiOverlay
         ResourceLocation texId = CoverTextureManager.getInstance().getCover(picUrl, null);
         if (texId != null)
         {
-            RenderSystem.enableBlend();
-            RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
-            g.blit(texId, x, y, 0, 0, size, size, size, size);
-            RenderSystem.disableBlend();
-            // 圆角裁切遮罩（四个角上盖玻璃色小方块，视觉圆角化）
-            int corner = 4;
-            int mask = 0x99131316;
-            g.fill(x, y, x + corner, y + 1, mask); g.fill(x, y + 1, x + 1, y + corner, mask);
-            g.fill(x + size - corner, y, x + size, y + 1, mask); g.fill(x + size - 1, y + 1, x + size, y + corner, mask);
-            g.fill(x, y + size - 1, x + corner, y + size, mask); g.fill(x, y + size - corner, x + 1, y + size - 1, mask);
-            g.fill(x + size - corner, y + size - 1, x + size, y + size, mask); g.fill(x + size - 1, y + size - corner, x + size, y + size - 1, mask);
+            // SDF 解析圆角封面（shader 不可用时降级为方形 blit）
+            GlassRenderer.drawSdfCover(g, x, y, size, size, Math.max(3f, size * 0.22f), texId);
         }
         else
         {

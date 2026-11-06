@@ -86,7 +86,9 @@ public class SettingsScreen extends Screen
             // === 播放 ===
             addEntry(new HeaderEntry("─── 播放 ───"));
             addEntry(new QualityEntry("音质", ZephyrConfig.DEFAULT_QUALITY));
-            addEntry(new ToggleEntry("洞穴混响", ZephyrConfig.PLAYBACK_CAVE_REVERB, Arrays.asList("OFF", "ON")));
+            addEntry(new ToggleEntry("洞穴混响", ZephyrConfig.PLAYBACK_CAVE_REVERB, Arrays.asList("OFF", "ON"),
+                    () -> com.zephyr.music.client.audio.MusicPlayer.getInstance()
+                            .setCaveReverb(ZephyrConfig.PLAYBACK_CAVE_REVERB.get())));
             addEntry(new ToggleEntry("听歌打卡", ZephyrConfig.SCROBBLE_ENABLED, Arrays.asList("OFF", "ON")));
 
             // === 歌词设置 ===
@@ -138,8 +140,12 @@ public class SettingsScreen extends Screen
             final String name;
             final net.minecraftforge.common.ForgeConfigSpec.BooleanValue cfg;
             final List<String> options;
+            /** 可选回调：配置切换后立即生效（如洞穴混响 → OpenAL EFX） */
+            final Runnable onChanged;
             ToggleEntry(String n, net.minecraftforge.common.ForgeConfigSpec.BooleanValue c, List<String> opts)
-            { name = n; cfg = c; options = opts; }
+            { this(n, c, opts, null); }
+            ToggleEntry(String n, net.minecraftforge.common.ForgeConfigSpec.BooleanValue c, List<String> opts, Runnable onChanged)
+            { name = n; cfg = c; options = opts; this.onChanged = onChanged; }
             @Override String label() { return name + ": " + (cfg.get() ? options.get(1) : options.get(0)); }
             @Override
             public void render(GuiGraphics g, int idx, int top, int left, int w, int h, int mx, int my, boolean hov, float pt)
@@ -155,6 +161,7 @@ public class SettingsScreen extends Screen
             public boolean mouseClicked(double x, double y, int b)
             {
                 cfg.set(!cfg.get());
+                if (onChanged != null) onChanged.run();
                 return true;
             }
             @Override public Component getNarration() { return Component.literal(label()); }

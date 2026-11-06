@@ -547,9 +547,9 @@ public class MusicPlayer
         if (playing.get() && !paused.get())
         {
             paused.set(true);
-            // ★ 冻结当前位置（暂停期间 getPositionSec 返回 lastReturnedPos）
+            // ★ 冻结当前位置：OpenAL 源暂停后 AL_SAMPLE_OFFSET 自动冻结，
+            //   positionOffsetSec 保持不变（不要清零/重基准，否则恢复时会二次累计导致歌词抢跑）
             lastReturnedPos = getPositionSec();
-            positionOffsetSec = 0;
             ScrobbleManager.getInstance().stopTicking();
             OpenAlOutput.getInstance().pause();
             listeners.forEach(l -> l.onPlayStateChanged(false, true));
@@ -561,8 +561,10 @@ public class MusicPlayer
         if (playing.get() && paused.get())
         {
             paused.set(false);
-            // ★ 恢复：以暂停点为新的基准偏移
-            positionOffsetSec = lastReturnedPos;
+            // ★ 修复：不要重基准 positionOffsetSec！暂停期间 OpenAL 的样本偏移没有动，
+            //   恢复后 outPos 会从暂停点继续增长，直接相加就是正确位置。
+            //   旧实现把 lastReturnedPos 加进 offset，导致每次暂停→恢复后
+            //   进度/歌词向前跳一截（暂停时已播放的时长被算了两次）。
             ScrobbleManager.getInstance().startTicking();
             OpenAlOutput.getInstance().resume();
             listeners.forEach(l -> l.onPlayStateChanged(true, false));
@@ -750,22 +752,36 @@ public class MusicPlayer
                 currentDecoder = new Decoder();
                 outputOpened = false;
 
-                // 计算需要跳过的帧数（近似：MP3 44100Hz 每帧 1152 samples = 26.12ms）
-                // 也可以用 JLayer Header 的 frame count 计算
-                int skipFrames = (int)(seekTarget * 38.28); // 38.28 frames/sec at 44100Hz
-
                 stopped.set(false);
                 paused.set(false);
                 playing.set(true);
-                positionOffsetSec = seekTarget;
-                lastReturnedPos = seekTarget;
                 playStartTimeMs = System.currentTimeMillis();
 
-                ZephyrMusic.LOGGER.info("[Zephyr] Seek: skipping {} frames to {}s", skipFrames, String.format("%.1f", seekTarget));
+                // ★ 修复 seek 后歌词/进度错位：旧实现用固定 38.28 帧/秒（44.1kHz 专属），
+                //   48kHz / MPEG-2(576 样本帧) 的歌会跳错帧数 → 跳到的位置与目标不符，
+                //   歌词从错误的位置开始唱。改为先读第一帧拿真实 ms_per_frame，
+                //   并用"实际跳过的帧数 × 每帧时长"回填 positionOffsetSec。
+                double msPerFrame = 26.122;
+                int skipped = 0;
+                try
+                {
+                    Header first = currentBitstream.readFrame();
+                    if (first != null)
+                    {
+                        currentBitstream.closeFrame();
+                        skipped = 1;
+                        float mf = first.ms_per_frame();
+                        if (mf > 0) msPerFrame = mf;
+                    }
+                }
+                catch (Exception ignored) {}
+
+                int skipFrames = (int) Math.round(seekTarget * 1000.0 / msPerFrame);
+                ZephyrMusic.LOGGER.info("[Zephyr] Seek: {} ms/frame, skipping {} frames to {}s",
+                        String.format("%.3f", msPerFrame), skipFrames, String.format("%.1f", seekTarget));
 
                 // 跳过帧（不解码到音频设备，只读 Bitstream）
-                int skipped = 0;
-                for (int i = 0; i < skipFrames && !stopped.get(); i++)
+                for (int i = skipped; i < skipFrames && !stopped.get(); i++)
                 {
                     try
                     {
@@ -777,6 +793,11 @@ public class MusicPlayer
                     catch (Exception e) { break; }
                 }
                 ZephyrMusic.LOGGER.info("[Zephyr] Seek: skipped {} frames", skipped);
+
+                // 用实际跳过的帧数回填进度基准（与真实音频位置严格对齐）
+                double actualSec = skipped * msPerFrame / 1000.0;
+                positionOffsetSec = actualSec;
+                lastReturnedPos = actualSec;
 
                 // 开始正常播放
                 playThread = new Thread(this::decodeLoop, "ZephyrMusic-Decode");

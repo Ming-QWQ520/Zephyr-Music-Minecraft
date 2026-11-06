@@ -78,20 +78,110 @@ public final class GlassRenderer
         RenderSystem.setShader(() -> shader);
 
         shader.safeGetUniform("HalfSize").set(w / 2.0f, h / 2.0f);
+        shader.safeGetUniform("Center").set(w / 2.0f, h / 2.0f);
         shader.safeGetUniform("Radius").set(radius);
         shader.safeGetUniform("BorderWidth").set((border & 0xFF000000) != 0 ? 1.0f : 0.0f);
         setUniformColor(shader, "BorderColor", border);
         float sh = Math.max(0f, Math.min(1f, sheen));
         shader.safeGetUniform("Sheen").set(sh);
+        shader.safeGetUniform("Shadow").set(0.0f);
+        shader.safeGetUniform("ShapeKind").set(0.0f);
+        shader.safeGetUniform("FlipX").set(0.0f);
 
         BufferBuilder bb = Tesselator.getInstance().getBuilder();
         bb.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR_TEX);
-        // UV 传"面板局部像素坐标"，shader 里减去 HalfSize 得到以中心为原点的 SDF 坐标
+        // UV 传"面板局部像素坐标"，shader 里减去 Center 得到以中心为原点的 SDF 坐标
         // 顶部顶点带 sheen 高光（vertexColor 提亮），底部顶点稍暗
         putVertex(bb, mat, x,     y,     0, 0, brighten(fill,  sh * 0.35f));
         putVertex(bb, mat, x,     y + h, 0, h, dim(fill, sh * 0.12f));
         putVertex(bb, mat, x + w, y + h, w, h, dim(fill, sh * 0.12f));
         putVertex(bb, mat, x + w, y,     w, 0, brighten(fill,  sh * 0.35f));
+        BufferUploader.drawWithShader(bb.end());
+
+        RenderSystem.depthMask(true);
+        RenderSystem.enableDepthTest();
+    }
+
+    /**
+     * 柔和投影：在圆角矩形外侧画一圈指数衰减的黑色软阴影（悬浮感的核心）。
+     *
+     * @param strength 0..1，建议 0.35~0.6
+     */
+    public static void drawSdfShadow(GuiGraphics g, int x, int y, int w, int h,
+                                     float radius, float strength, int expand)
+    {
+        if (w <= 0 || h <= 0 || strength <= 0.001f || !shadersReady()) return;
+        radius = Math.min(radius, Math.min(w, h) / 2.0f);
+
+        int qw = w + expand * 2, qh = h + expand * 2;
+        int qx = x - expand, qy = y - expand;
+
+        Matrix4f mat = g.pose().last().pose();
+        ShaderInstance shader = glassShader;
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.disableDepthTest();
+        RenderSystem.depthMask(false);
+        RenderSystem.setShader(() -> shader);
+
+        shader.safeGetUniform("HalfSize").set(w / 2.0f, h / 2.0f);
+        shader.safeGetUniform("Center").set(qw / 2.0f, qh / 2.0f);
+        shader.safeGetUniform("Radius").set(radius);
+        shader.safeGetUniform("BorderWidth").set(0.0f);
+        setUniformColor(shader, "BorderColor", 0);
+        shader.safeGetUniform("Sheen").set(0.0f);
+        shader.safeGetUniform("Shadow").set(Math.max(0f, Math.min(1f, strength)));
+        shader.safeGetUniform("ShapeKind").set(0.0f);
+        shader.safeGetUniform("FlipX").set(0.0f);
+
+        BufferBuilder bb = Tesselator.getInstance().getBuilder();
+        bb.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR_TEX);
+        putVertex(bb, mat, qx,     qy,     0, 0, 0);
+        putVertex(bb, mat, qx,     qy + qh, 0, qh, 0);
+        putVertex(bb, mat, qx + qw, qy + qh, qw, qh, 0);
+        putVertex(bb, mat, qx + qw, qy,     qw, 0, 0);
+        BufferUploader.drawWithShader(bb.end());
+
+        RenderSystem.depthMask(true);
+        RenderSystem.enableDepthTest();
+    }
+
+    /**
+     * 矢量播放/前进三角形（任意缩放都解析抗锯齿，替代位图字体 ▶ ▶ 的糊感）。
+     *
+     * @param pointLeft true 指向左侧（上一首/返回）
+     */
+    public static void drawSdfTriangle(GuiGraphics g, float cx, float cy, float size,
+                                       int argb, boolean pointLeft)
+    {
+        if (size <= 0.5f || !shadersReady()) return;
+        int x = Math.round(cx - size / 2f), y = Math.round(cy - size / 2f);
+        int isz = Math.max(1, Math.round(size));
+
+        Matrix4f mat = g.pose().last().pose();
+        ShaderInstance shader = glassShader;
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.disableDepthTest();
+        RenderSystem.depthMask(false);
+        RenderSystem.setShader(() -> shader);
+
+        shader.safeGetUniform("HalfSize").set(isz / 2.0f, isz / 2.0f);
+        shader.safeGetUniform("Center").set(isz / 2.0f, isz / 2.0f);
+        shader.safeGetUniform("Radius").set(0.0f);
+        shader.safeGetUniform("BorderWidth").set(0.0f);
+        setUniformColor(shader, "BorderColor", 0);
+        shader.safeGetUniform("Sheen").set(0.0f);
+        shader.safeGetUniform("Shadow").set(0.0f);
+        shader.safeGetUniform("ShapeKind").set(1.0f);
+        shader.safeGetUniform("FlipX").set(pointLeft ? 1.0f : 0.0f);
+
+        BufferBuilder bb = Tesselator.getInstance().getBuilder();
+        bb.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR_TEX);
+        putVertex(bb, mat, x,     y,     0, 0, argb);
+        putVertex(bb, mat, x,     y + isz, 0, isz, argb);
+        putVertex(bb, mat, x + isz, y + isz, isz, isz, argb);
+        putVertex(bb, mat, x + isz, y,     isz, 0, argb);
         BufferUploader.drawWithShader(bb.end());
 
         RenderSystem.depthMask(true);
@@ -205,11 +295,14 @@ public final class GlassRenderer
     /**
      * 绘制毛玻璃面板（需要在每帧渲染开头已调用 BlurManager.runPending()）。
      *
-     * @param blurBehind 是否在其后方绘制模糊背景图（HUD 悬浮面板需要，屏幕内嵌面板可复用整屏模糊）
+     * @param blurBehind 是否在其后方绘制模糊背景图（播放器整屏窗体需要；HUD 一律 false ——
+     *                   一次性模糊快照叠在"持续运动的世界"上会显得假）
      */
     public static void glassPanel(GuiGraphics g, int x, int y, int w, int h,
                                   float radius, int tint, float sheen, boolean blurBehind)
     {
+        // 柔和投影先画（悬浮感）
+        drawSdfShadow(g, x + 1, y + 2, w, h, radius, 0.42f, 12);
         if (blurBehind && BlurManager.hasBlur())
         {
             // 稍微外扩 2px 模糊区，避免模糊图边缘从圆角内侧露出

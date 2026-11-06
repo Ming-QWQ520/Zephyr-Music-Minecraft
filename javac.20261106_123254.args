@@ -1,6 +1,0 @@
--proc:none
--d
-/tmp/pscheck
--cp
-/tmp/none
-src/main/java/com/zephyr/music/client/gui/screen/PlayerScreen.java
