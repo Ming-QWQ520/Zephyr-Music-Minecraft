@@ -180,7 +180,7 @@ public class NeteaseHttpClient
                 }
                 return resp;
             }
-            catch (java.net.http.HttpTimeoutException | java.net.ConnectException | java.io.IOException e)
+            catch (java.io.IOException e)
             {
                 last = e;
                 if (attempt < 2)

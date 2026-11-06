@@ -67,6 +67,8 @@ public class PlayerScreen extends Screen
         Rect() {}
         Rect(float x, float y, float w, float h) { set(x, y, w, h); }
         void set(float x, float y, float w, float h) { this.x = x; this.y = y; this.w = w; this.h = h; }
+        void set(Rect o) { set(o.x, o.y, o.w, o.h); }
+        boolean isEmpty() { return w <= 0f || h <= 0f; }
         float right() { return x + w; }
         float bottom() { return y + h; }
         boolean contains(float px, float py) { return px >= x && px < x + w && py >= y && py < y + h; }
@@ -189,7 +191,7 @@ public class PlayerScreen extends Screen
     private final Spring viewFade = new Spring(210f, 24f, 1f);
     private boolean lastCoverState = false;
     private Boolean viewFrom = null;
-    private final Spring loadBar = new Spring(160f, 24f);
+    private Spring loadBar = new Spring(160f, 24f);
     private long loadKey = -1L;
     private Rect sbTrackRect = new Rect();
     private int sbTotal = 0;
@@ -768,6 +770,8 @@ public class PlayerScreen extends Screen
         text(s, cx - tw(s, size, bold) / 2f, y, size, color, bold);
     }
 
+    private void textC(String s, float cx, float y, float size, int color) { textC(s, cx, y, size, color, false); }
+
     /** 逻辑字宽 */
     private float tw(String s, float size, boolean bold)
     {
@@ -843,7 +847,17 @@ public class PlayerScreen extends Screen
     {
         if (qrTexture == null)
         {
-            DynamicTexture dt = new DynamicTexture(img);
+            // BufferedImage → NativeImage（1.20.1 DynamicTexture 只接受 NativeImage）
+            net.minecraft.client.renderer.texture.NativeImage ni =
+                    new net.minecraft.client.renderer.texture.NativeImage(img.getWidth(), img.getHeight(), true);
+            for (int py = 0; py < img.getHeight(); py++)
+                for (int px2 = 0; px2 < img.getWidth(); px2++)
+                {
+                    int argb = img.getRGB(px2, py);
+                    int a = (argb >>> 24) & 0xFF, rr2 = (argb >>> 16) & 0xFF, gg2 = (argb >>> 8) & 0xFF, bb2 = argb & 0xFF;
+                    ni.setPixelRGBA(px2, py, (a << 24) | (bb2 << 16) | (gg2 << 8) | rr2);
+                }
+            DynamicTexture dt = new DynamicTexture(ni);
             qrTexture = Minecraft.getInstance().getTextureManager().register("zephyr_qr", dt);
         }
         GlassRenderer.drawSdfCover(gRef, ri(r.x), ri(r.y), ri(r.w), ri(r.h), radius, qrTexture);
