@@ -151,7 +151,7 @@ public class ZephyrConfig
         THEME_PRIMARY = BUILDER.comment("Primary theme color (hex)")
                 .define("theme_primary", "#FF5C8A");
         THEME_ACCENT = BUILDER.comment("Accent theme color (hex)")
-                .define("theme_accent", "#FF5C8A");
+                .define("theme_accent", "#FF375F");
         THEME_BG = BUILDER.comment("Background theme color (hex)")
                 .define("theme_bg", "#17171A");
         BUILDER.pop();

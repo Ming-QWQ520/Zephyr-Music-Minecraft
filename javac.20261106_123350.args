@@ -1,0 +1,7 @@
+-proc:none
+-d
+/tmp/pscheck
+src/main/java/com/zephyr/music/client/gui/screen/PlayerScreen.java
+src/main/java/com/zephyr/music/net/NeteaseHttpClient.java
+src/main/java/com/zephyr/music/client/glass/GlassRenderer.java
+src/main/java/com/zephyr/music/client/ClientEventHandler.java

@@ -45,7 +45,9 @@ public class NeteaseHttpClient
         this.client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(15))
                 .executor(executor)
-                .followRedirects(HttpClient.Redirect.NORMAL)
+                // ★ 手动跟随重定向：HttpClient 自动重定向遇到 https→http 降级会抛
+                //   "Invalid redirection"（/login/refresh 实测会触发），改为手动处理
+                .followRedirects(HttpClient.Redirect.NEVER)
                 .build();
     }
 
@@ -135,44 +137,87 @@ public class NeteaseHttpClient
     }
 
     /**
-     * 异步 GET 请求
+     * 发送请求：手动跟随重定向（最多 3 次，允许 https→http 降级）+ 连接失败自动重试。
+     * 返回最终非重定向响应。
+     */
+    private HttpResponse<String> sendWithRetry(HttpRequest.Builder rb, String method, String body)
+            throws Exception
+    {
+        Exception last = null;
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                HttpRequest.Builder b = HttpRequest.newBuilder()
+                        .uri(rb.build().uri())
+                        .timeout(Duration.ofSeconds(20))
+                        .header("User-Agent", "ZephyrMusic-Mod/1.0")
+                        .header("Accept", "application/json");
+                String cookie = getCookie();
+                if (cookie != null && !cookie.isEmpty())
+                {
+                    try { b.header("Cookie", cookie); }
+                    catch (IllegalArgumentException e) { ZephyrMusic.LOGGER.warn("[Zephyr] Cookie header rejected: {}", e.getMessage()); }
+                }
+                if ("POST".equals(method))
+                    b.header("Content-Type", "application/x-www-form-urlencoded")
+                     .POST(HttpRequest.BodyPublishers.ofString(body == null ? "" : body));
+                else b.GET();
+
+                HttpResponse<String> resp = client.send(b.build(), HttpResponse.BodyHandlers.ofString());
+                int sc = resp.statusCode();
+                if ((sc == 301 || sc == 302 || sc == 303 || sc == 307 || sc == 308))
+                {
+                    String loc = resp.headers().firstValue("Location").orElse(null);
+                    if (loc != null && !loc.isEmpty())
+                    {
+                        URI next = rb.build().uri().resolve(loc);
+                        // 303/302/301 上 POST 降为 GET
+                        if ("POST".equals(method) && (sc == 301 || sc == 302 || sc == 303))
+                            return sendWithRetry(HttpRequest.newBuilder(next), "GET", null);
+                        return sendWithRetry(HttpRequest.newBuilder(next), method, body);
+                    }
+                }
+                return resp;
+            }
+            catch (java.net.http.HttpTimeoutException | java.net.ConnectException | java.io.IOException e)
+            {
+                last = e;
+                if (attempt < 2)
+                {
+                    try { Thread.sleep(600L * (attempt + 1)); }
+                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); throw ie; }
+                }
+            }
+        }
+        throw last != null ? last : new java.io.IOException("request failed");
+    }
+
+    /**
+     * 异步 GET 请求（带重定向跟随 + 重试）
      */
     public CompletableFuture<JsonObject> get(String path, Map<String, String> params)
     {
         StringBuilder url = new StringBuilder(getApiBase()).append(path);
         LinkedHashMap<String, String> allParams = buildParams(params);
         url.append("?").append(buildQueryString(allParams));
+        final String furl = url.toString();
 
-        HttpRequest.Builder rb = HttpRequest.newBuilder()
-                .uri(URI.create(url.toString()))
-                .timeout(Duration.ofSeconds(20))
-                .header("User-Agent", "ZephyrMusic-Mod/1.0")
-                .header("Accept", "application/json")
-                .GET();
-
-        // 同时通过 Cookie 头发送（兼容部分服务器配置）
-        String cookie = getCookie();
-        if (cookie != null && !cookie.isEmpty())
-        {
+        return CompletableFuture.supplyAsync(() -> {
             try
             {
-                rb.header("Cookie", cookie);
+                HttpResponse<String> resp = sendWithRetry(HttpRequest.newBuilder(URI.create(furl)), "GET", null);
+                return parseResponse(resp);
             }
-            catch (IllegalArgumentException e)
+            catch (Exception e)
             {
-                ZephyrMusic.LOGGER.warn("[Zephyr] Cookie header rejected: {}", e.getMessage());
+                ZephyrMusic.LOGGER.error("[Zephyr] GET {} failed: {}", path, e.getMessage());
+                JsonObject err = new JsonObject();
+                err.addProperty("code", -1);
+                err.addProperty("message", e.getMessage() == null ? "unknown" : e.getMessage());
+                return err;
             }
-        }
-
-        return client.sendAsync(rb.build(), HttpResponse.BodyHandlers.ofString())
-                .thenApply(this::parseResponse)
-                .exceptionally(e -> {
-                    ZephyrMusic.LOGGER.error("[Zephyr] GET {} failed: {}", path, e.getMessage());
-                    JsonObject err = new JsonObject();
-                    err.addProperty("code", -1);
-                    err.addProperty("message", e.getMessage() == null ? "unknown" : e.getMessage());
-                    return err;
-                });
+        }, executor);
     }
 
     public CompletableFuture<JsonObject> get(String path)
@@ -181,7 +226,7 @@ public class NeteaseHttpClient
     }
 
     /**
-     * 异步 POST 请求（form-urlencoded）
+     * 异步 POST 请求（form-urlencoded，带重定向跟随 + 重试）
      */
     public CompletableFuture<JsonObject> post(String path, Map<String, String> params)
     {
@@ -189,36 +234,21 @@ public class NeteaseHttpClient
         String body = buildQueryString(allParams);
         String url = getApiBase() + path;
 
-        HttpRequest.Builder rb = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(20))
-                .header("User-Agent", "ZephyrMusic-Mod/1.0")
-                .header("Accept", "application/json")
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .POST(HttpRequest.BodyPublishers.ofString(body));
-
-        String cookie = getCookie();
-        if (cookie != null && !cookie.isEmpty())
-        {
+        return CompletableFuture.supplyAsync(() -> {
             try
             {
-                rb.header("Cookie", cookie);
+                HttpResponse<String> resp = sendWithRetry(HttpRequest.newBuilder(URI.create(url)), "POST", body);
+                return parseResponse(resp);
             }
-            catch (IllegalArgumentException e)
+            catch (Exception e)
             {
-                ZephyrMusic.LOGGER.warn("[Zephyr] Cookie header rejected: {}", e.getMessage());
+                ZephyrMusic.LOGGER.error("[Zephyr] POST {} failed: {}", path, e.getMessage());
+                JsonObject err = new JsonObject();
+                err.addProperty("code", -1);
+                err.addProperty("message", e.getMessage() == null ? "unknown" : e.getMessage());
+                return err;
             }
-        }
-
-        return client.sendAsync(rb.build(), HttpResponse.BodyHandlers.ofString())
-                .thenApply(this::parseResponse)
-                .exceptionally(e -> {
-                    ZephyrMusic.LOGGER.error("[Zephyr] POST {} failed: {}", path, e.getMessage());
-                    JsonObject err = new JsonObject();
-                    err.addProperty("code", -1);
-                    err.addProperty("message", e.getMessage() == null ? "unknown" : e.getMessage());
-                    return err;
-                });
+        }, executor);
     }
 
     /**

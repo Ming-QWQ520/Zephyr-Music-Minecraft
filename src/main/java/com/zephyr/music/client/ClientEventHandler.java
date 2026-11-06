@@ -51,6 +51,9 @@ public class ClientEventHandler
         event.registerShader(
                 new ShaderInstance(event.getResourceProvider(), "zephyrmusic/blur", DefaultVertexFormat.POSITION_TEX),
                 GlassRenderer::setBlurShader);
+        event.registerShader(
+                new ShaderInstance(event.getResourceProvider(), "zephyrmusic/cover", DefaultVertexFormat.POSITION_COLOR_TEX),
+                GlassRenderer::setCoverShader);
         ZephyrMusic.LOGGER.info("[Zephyr] Glass shaders registered");
     }
 

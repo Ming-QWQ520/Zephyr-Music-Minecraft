@@ -25,15 +25,18 @@ public final class GlassRenderer
     /** 由 ClientEventHandler 在 RegisterShadersEvent 中注册 */
     private static ShaderInstance glassShader;
     private static ShaderInstance blurShader;
+    private static ShaderInstance coverShader;
     private static boolean shaderFailed = false;
 
     private GlassRenderer() {}
 
     public static ShaderInstance getGlassShader() { return glassShader; }
     public static ShaderInstance getBlurShader() { return blurShader; }
+    public static ShaderInstance getCoverShader() { return coverShader; }
 
     public static void setGlassShader(ShaderInstance s) { glassShader = s; }
     public static void setBlurShader(ShaderInstance s) { blurShader = s; }
+    public static void setCoverShader(ShaderInstance s) { coverShader = s; }
 
     public static boolean shadersReady()
     {
@@ -100,6 +103,63 @@ public final class GlassRenderer
                                         float radius, int fill)
     {
         drawSdfRoundRect(g, x, y, w, h, radius, fill, 0, 0.0f);
+    }
+
+    // ==================================================================
+    //  SDF 圆角贴图（封面圆角，对齐 DangoMusic drawCover）
+    // ==================================================================
+
+    /**
+     * 绘制一张带 SDF 圆角掩码的贴图（专辑/歌单封面）。
+     * shader 不可用时降级为方形贴图。
+     */
+    public static void drawSdfCover(GuiGraphics g, int x, int y, int w, int h,
+                                    float radius, ResourceLocation tex)
+    {
+        if (w <= 0 || h <= 0) return;
+        if (!coverReady() || tex == null)
+        {
+            if (tex != null)
+            {
+                RenderSystem.setShaderTexture(0, tex);
+                RenderSystem.enableBlend();
+                RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
+                g.blit(tex, x, y, 0, 0, w, h, w, h);
+                RenderSystem.disableBlend();
+            }
+            return;
+        }
+        radius = Math.min(radius, Math.min(w, h) / 2.0f);
+
+        Matrix4f mat = g.pose().last().pose();
+        ShaderInstance shader = coverShader;
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.disableDepthTest();
+        RenderSystem.depthMask(false);
+        RenderSystem.setShaderTexture(0, tex);
+        RenderSystem.setShader(() -> shader);
+
+        shader.safeGetUniform("HalfSize").set(w / 2.0f, h / 2.0f);
+        shader.safeGetUniform("Radius").set(radius);
+        shader.safeGetUniform("ColorModulator").set(1.0f, 1.0f, 1.0f, 1.0f);
+
+        BufferBuilder bb = Tesselator.getInstance().getBuilder();
+        bb.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR_TEX);
+        // UV = 面板局部像素坐标；片元端 panelPos/size 得到贴图 UV（行 0 = 图片顶部）
+        putVertex(bb, mat, x,     y,     0, 0, 0xFFFFFFFF);
+        putVertex(bb, mat, x,     y + h, 0, h, 0xFFFFFFFF);
+        putVertex(bb, mat, x + w, y + h, w, h, 0xFFFFFFFF);
+        putVertex(bb, mat, x + w, y,     w, 0, 0xFFFFFFFF);
+        BufferUploader.drawWithShader(bb.end());
+
+        RenderSystem.depthMask(true);
+        RenderSystem.enableDepthTest();
+    }
+
+    private static boolean coverReady()
+    {
+        return !shaderFailed && coverShader != null;
     }
 
     private static void putVertex(BufferBuilder bb, Matrix4f mat, int x, int y, int u, int v, int argb)
