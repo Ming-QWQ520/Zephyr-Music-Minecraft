@@ -17,7 +17,7 @@
 
 ---
 
-## v0.2.0 · 全面借鉴 DangoMusic 的 UI 与功能
+## v0.1.0 · 全面借鉴 DangoMusic 的 UI 与功能
 
 > 界面与功能设计大量参考 [Sorihiko/DangoMusic](https://github.com/Sorihiko/DangoMusic)（GPL-3.0）：液态玻璃单窗口布局、分组侧栏导航、歌单封面墙、Coverflow 封面浏览、灵动岛 HUD、iOS 风格设置项。
 
@@ -30,7 +30,7 @@
 - **灵动岛 HUD** — 新增 `hud_island_mode`：顶部居中小胶囊（封面 + 歌名/歌手 + 当前时间 + 迷你进度条），点击打开播放器，优先于悬浮面板。
 - **入场动画** — 页面切换时标题右侧滑入、条目自下而上错开浮入（DangoMusic itemAnim 风格）。
 - **快捷键** — 播放器内 `Space` 播放/暂停、`←`/`→` 快退/快进 5 秒（封面墙模式下切封面）、`Backspace` 返回上一级。
-- **版本信息** — 版本号 0.2.0。
+- **版本信息** — 版本号 0.1.0。
 
 ## v0.1.0 · 播放引擎修复与体验优化（历史）
 
@@ -271,7 +271,7 @@ cd Zephyr-Music-Minecraft
 
 ## 致谢
 
-- [Sorihiko/DangoMusic](https://github.com/Sorihiko/DangoMusic) — v0.2.0 UI 与功能设计参考（GPL-3.0）
+- [Sorihiko/DangoMusic](https://github.com/Sorihiko/DangoMusic) — v0.1.0 UI 与功能设计参考（GPL-3.0）
 - [Zephyr Music 桌面播放器](https://github.com/) — 灵感来源与打卡机制参考
 - [AllMusic](https://github.com/Coloryr/AllMusic) — UI 设计参考（青色主题风格）
 - [JLayer](http://www.javazoom.net/javalayer/javalayer.html) — MP3 解码库 (LGPL)

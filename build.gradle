@@ -204,19 +204,3 @@ publishing {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8' // Use the UTF-8 charset for Java compilation
 }
-
-// ====================================================================
-// Mirror redirect: unreachable hosts (maven.minecraftforge.net) ->
-// BMCLAPI mirror. Applied lazily to all Maven repositories created by
-// ForgeGradle so dependency resolution works in restricted networks.
-// ====================================================================
-repositories.configureEach { repo ->
-    if (repo instanceof MavenArtifactRepository) {
-        def u = repo.url.toString()
-        if (u.contains('maven.minecraftforge.net')) {
-            repo.url = uri('https://bmclapi2.bangbang93.com/maven/')
-        } else if (u.contains('libraries.minecraft.net')) {
-            repo.url = uri('https://bmclapi2.bangbang93.com/libraries/')
-        }
-    }
-}
