@@ -848,8 +848,8 @@ public class PlayerScreen extends Screen
         if (qrTexture == null)
         {
             // BufferedImage → NativeImage（1.20.1 DynamicTexture 只接受 NativeImage）
-            com.mojang.blaze3d.pipeline.NativeImage ni =
-                    new com.mojang.blaze3d.pipeline.NativeImage(img.getWidth(), img.getHeight(), true);
+            com.mojang.blaze3d.platform.NativeImage ni =
+                    new com.mojang.blaze3d.platform.NativeImage(img.getWidth(), img.getHeight(), true);
             for (int py = 0; py < img.getHeight(); py++)
                 for (int px2 = 0; px2 < img.getWidth(); px2++)
                 {
